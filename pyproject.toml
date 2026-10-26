@@ -1,0 +1,41 @@
+[project]
+name = "tl6500v"
+version = "0.1.0"
+description = "Get instant push alerts (Telegram, LINE) for new SMS on a TP-Link TL-MR6500v router, with a small web Dashboard."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jack Luo" }]
+keywords = ["tp-link", "tl-mr6500v", "sms", "lte", "router", "telegram", "line", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    "pycryptodome>=4.2.0",
+    "pydantic-settings>=2.16.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tl_mr6500v"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

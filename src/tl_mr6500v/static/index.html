@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TL-MR6500v Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main id="login-view" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <h1>TL-MR6500v</h1>
+      <p class="muted" data-i18n="app.subtitle"></p>
+      <label><span data-i18n="login.username"></span> <input name="username" autocomplete="username" value="admin" required></label>
+      <label><span data-i18n="login.password"></span> <input name="password" type="password" autocomplete="current-password" required autofocus></label>
+      <p id="login-error" class="error-text" role="alert"></p>
+      <button type="submit" class="primary" data-i18n="login.submit"></button>
+      <label><span data-i18n="lang.label"></span> <select class="lang-select"></select></label>
+    </form>
+  </main>
+
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <h1>TL-MR6500v</h1>
+      <span id="router-pill" class="pill">—</span>
+      <span class="spacer"></span>
+      <select class="lang-select" data-i18n-label="lang.label"></select>
+      <button id="poll-now" type="button" data-i18n="poll.now"></button>
+      <button id="logout" type="button" data-i18n="logout"></button>
+      <div id="sweep" class="sweep" aria-hidden="true"></div>
+    </header>
+
+    <div id="error-banner" class="banner" hidden></div>
+
+    <section id="hero" class="hero" data-state="unknown">
+      <div id="signal" class="bars" role="img"><i></i><i></i><i></i><i></i></div>
+      <div class="hero-text">
+        <p id="hero-main" class="hero-main"></p>
+        <p id="hero-sub" class="hero-sub"></p>
+        <p id="hero-ip" class="hero-ip"></p>
+      </div>
+    </section>
+
+    <div class="tabs-wrap"><nav class="tabs" role="tablist">
+      <button role="tab" data-tab="status" data-i18n="tab.status"></button>
+      <button role="tab" data-tab="logs" data-i18n="tab.logs"></button>
+      <button role="tab" data-tab="settings" data-i18n="tab.settings"></button>
+      <button role="tab" data-tab="messages" class="active"><span data-i18n="tab.messages"></span> <span id="messages-count"></span></button>
+    </nav></div>
+
+    <section id="tab-messages" class="panel">
+      <div class="toolbar">
+        <button id="import-existing" type="button" data-i18n="msg.import"></button>
+        <button id="clear-messages" type="button" data-i18n="msg.clear"></button>
+        <span id="import-msg" class="small muted" role="status"></span>
+      </div>
+      <div id="messages-list" class="messages"></div>
+      <button id="messages-more" type="button" hidden data-i18n="msg.more"></button>
+      <p id="messages-empty" class="muted" hidden data-i18n="msg.empty"></p>
+    </section>
+
+    <section id="tab-status" class="panel" hidden>
+      <div class="facts">
+      <div class="fact">
+        <h2 data-i18n="card.network"></h2>
+        <dl id="network" class="kv"></dl>
+        <p id="network-note" class="muted small"></p>
+      </div>
+      <div class="fact">
+        <h2 data-i18n="card.poll"></h2>
+        <dl id="poll-info" class="kv"></dl>
+      </div>
+      <div class="fact">
+        <h2 data-i18n="card.push"></h2>
+        <dl id="push-info" class="kv"></dl>
+      </div>
+      </div>
+
+    </section>
+
+    <section id="tab-logs" class="panel" hidden>
+      <div class="toolbar">
+        <label><span data-i18n="log.level"></span>
+          <select id="log-level">
+            <option value="INFO" data-i18n="log.all"></option>
+            <option value="WARNING" data-i18n="log.warn"></option>
+            <option value="ERROR" data-i18n="log.error"></option>
+          </select>
+        </label>
+      </div>
+      <div id="log-list" class="logs"></div>
+    </section>
+
+    <section id="tab-settings" class="panel" hidden>
+      <form id="settings-form" class="settings">
+        <label class="field">
+          <span data-i18n="set.interval"></span>
+          <input name="poll_interval_seconds" type="number" min="5" max="3600" step="1" required>
+          <small class="muted" data-i18n="set.intervalHint"></small>
+        </label>
+        <label class="check">
+          <input name="kick_existing_login" type="checkbox">
+          <span><span data-i18n="set.kick"></span>
+            <small class="muted" data-i18n="set.kickHint"></small></span>
+        </label>
+        <label class="check">
+          <input name="allow_lan_access" type="checkbox">
+          <span><span data-i18n="set.lan"></span>
+            <small class="muted" data-i18n="set.lanHint"></small></span>
+        </label>
+        <label class="check">
+          <input name="notify_errors" type="checkbox">
+          <span><span data-i18n="set.notify"></span>
+            <small class="muted" data-i18n="set.notifyHint"></small></span>
+        </label>
+        <p id="settings-msg" class="small" role="status"></p>
+        <button type="submit" class="primary" data-i18n="set.save"></button>
+      </form>
+    </section>
+  </div>
+
+  <script src="/i18n.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

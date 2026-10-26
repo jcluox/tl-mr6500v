@@ -1,0 +1,13 @@
+.env
+.env.*
+.venv
+data
+logs
+.git
+.github
+.claude
+specs
+assets
+tests
+__pycache__
+.pytest_cache
