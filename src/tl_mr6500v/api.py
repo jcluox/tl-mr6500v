@@ -107,6 +107,20 @@ async def clear_messages(request: Request):
     return {"deleted": deleted}
 
 
+@api.post("/messages/{message_id}/read")
+async def mark_message_read(message_id: int, request: Request):
+    """Mark a message as read on the router and in the history (used when the message is opened in the Dashboard)."""
+    try:
+        result = await request.app.state.poller.mark_read(message_id)
+    except RouterBusy as exc:
+        raise HTTPException(409, str(exc))
+    except RouterError as exc:
+        raise HTTPException(502, str(exc))
+    if result is None:
+        raise HTTPException(404, "Message not found")
+    return {"read": True, "synced": result}
+
+
 @api.post("/messages/import")
 async def import_messages(request: Request):
     """Import existing messages from the router inbox into the history (nothing is pushed)."""

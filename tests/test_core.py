@@ -8,7 +8,7 @@ from tl_mr6500v.models import Sms
 from tl_mr6500v.notifier import Notifier
 from tl_mr6500v.poller import Poller
 from tl_mr6500v.providers.base import Provider
-from tl_mr6500v.router import PollResult, RouterBusy, parse_network, parse_sms
+from tl_mr6500v.router import PollResult, RouterBusy, parse_network, parse_sms, parse_sms_entries
 from tl_mr6500v.runtime_settings import AppSettings, SettingsStore
 from tl_mr6500v.state import SeenStore
 
@@ -38,6 +38,11 @@ class FakeRouter:
         return PollResult(out, getattr(self, "network", None))
 
 
+    async def mark_read(self, sms, kick=False):
+        self.marked = [*getattr(self, "marked", []), sms.uid]
+        return not getattr(self, "missing", False)
+
+
 class Recorder(Provider):
     name = "rec"
 
@@ -63,6 +68,11 @@ def make_poller(tmp_path, router, providers):
     db = Database(tmp_path / "app.db")
     return Poller(router, Notifier(providers), SeenStore(tmp_path / "seen.json"),
                   MessageStore(db), SettingsStore(db, AppSettings()))
+
+
+def test_parse_sms_entries_keep_the_stack_of_each_entry():
+    entries = parse_sms_entries(RAW)
+    assert [(stack, m.index) for stack, m in entries] == [("1,0,0,0,0,0", 239), ("2,0,0,0,0,0", 238)]
 
 
 def test_parse_sms_multiline_content():

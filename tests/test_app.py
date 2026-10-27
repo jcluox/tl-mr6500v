@@ -193,6 +193,34 @@ def test_import_existing_saves_history_without_pushing(env):
     assert client.post("/api/poll").json()["new"] == []  # Imported messages are not treated as new
 
 
+def test_open_message_marks_it_read_on_router_and_in_history(env):
+    client, router, _ = env
+    login(client)
+    client.post("/api/poll")
+    router.pages = [[sms(5), sms(4)]]
+    client.post("/api/messages/import")
+    item = next(m for m in client.get("/api/messages?limit=200").json()["items"] if m["index"] == 5)
+    assert item["unread"]
+    assert client.post(f"/api/messages/{item['id']}/read").json() == {"read": True, "synced": "router"}
+    assert router.marked == [sms(5).uid]
+    items = client.get("/api/messages?limit=200").json()["items"]
+    assert not next(m for m in items if m["index"] == 5)["unread"]
+    # Already read: the router is not contacted again
+    assert client.post(f"/api/messages/{item['id']}/read").json()["synced"] == "local"
+    assert router.marked == [sms(5).uid]
+    assert client.post("/api/messages/99999/read").status_code == 404
+
+
+def test_mark_read_when_message_is_gone_from_router_still_marks_history(env):
+    client, router, _ = env
+    login(client)
+    client.post("/api/poll")
+    router.missing = True
+    item = client.get("/api/messages?limit=1").json()["items"][0]
+    assert client.post(f"/api/messages/{item['id']}/read").json()["synced"] == "missing"
+    assert not client.get("/api/messages?limit=1").json()["items"][0]["unread"]
+
+
 def test_import_limit_keeps_newest_and_marks_all_seen(tmp_path):
     from test_core import make_poller
 

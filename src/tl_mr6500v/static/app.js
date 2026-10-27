@@ -213,8 +213,23 @@ function messageCard(m) {
   );
   row.addEventListener("click", () => {
     row.setAttribute("aria-expanded", String(card.classList.toggle("open")));
+    if (card.classList.contains("open") && card.classList.contains("unread")) markRead(m.id, card);
   });
   return card;
+}
+
+// Opening a message marks it read on the router too; if that fails it stays unread so the next click retries
+async function markRead(id, card) {
+  const msg = $("import-msg");
+  try {
+    await api(`/api/messages/${id}/read`, { method: "POST" });
+    card.classList.remove("unread");
+    card.querySelector(".unread-dot")?.remove();
+    msg.textContent = "";
+  } catch (err) {
+    if (err instanceof Unauthorized) showLogin();
+    else msg.textContent = t("msg.readFailed", { e: errText(err) });
+  }
 }
 
 async function loadMessages(append = false) {

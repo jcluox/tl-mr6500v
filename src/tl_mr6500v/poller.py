@@ -97,6 +97,22 @@ class Poller:
                      len(result.messages), added, self.import_limit or "none")
             return added
 
+    async def mark_read(self, message_id: int) -> str | None:
+        """Mark a history message as read on the router, then in the history. Return None if the message is unknown,
+        otherwise "router" (marked on both), "missing" (no longer in the router's inbox; marked here only) or "local" (it was already read).
+
+        If the router cannot be reached, RouterBusy / RouterError is raised and the history is left unchanged."""
+        sms = self.history.get(message_id)
+        if sms is None:
+            return None
+        if not sms.unread:
+            return "local"
+        async with self._lock:
+            found = await self.router.mark_read(sms, kick=self.settings.get().kick_existing_login)
+        self.history.mark_read(message_id)
+        log.info("Marked message %s from %s as read%s", sms.uid, sms.sender, "" if found else " (not on the router anymore)")
+        return "router" if found else "missing"
+
     async def run(self) -> None:
         while True:
             self.wake.clear()

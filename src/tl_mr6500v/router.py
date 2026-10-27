@@ -34,7 +34,8 @@ _ENTRY_RE = re.compile(
     r"index=(\d+)\nfrom=(.*?)\ncontent=(.*?)\nreceivedTime=(.*?)\nunread=(\d)",
     re.DOTALL,
 )
-_BLOCK_RE = re.compile(r"^\[\d+(?:,\d+){5}\]1\s*$", re.MULTILINE)
+# The captured numbers are the entry's stack, which the router needs to address that one message
+_BLOCK_RE = re.compile(r"^\[(\d+(?:,\d+){5})\]1\s*$", re.MULTILINE)
 
 
 @dataclass
@@ -105,15 +106,21 @@ def parse_network(text: str) -> dict:
     return network
 
 
-def parse_sms(text: str) -> list[Sms]:
+def parse_sms_entries(text: str) -> list[tuple[str, Sms]]:
+    """Return (stack, message) pairs. The stack identifies the entry on the router's current page."""
     text = text.replace("\r\n", "\n")
-    messages = []
-    for block in _BLOCK_RE.split(text)[1:]:
+    parts = _BLOCK_RE.split(text)[1:]
+    entries = []
+    for stack, block in zip(parts[::2], parts[1::2]):
         match = _ENTRY_RE.search(block)
         if match:
             index, sender, content, received, unread = match.groups()
-            messages.append(Sms(int(index), sender, content, received, unread == "1"))
-    return messages
+            entries.append((stack, Sms(int(index), sender, content, received, unread == "1")))
+    return entries
+
+
+def parse_sms(text: str) -> list[Sms]:
+    return [sms for _, sms in parse_sms_entries(text)]
 
 
 class RouterClient:
@@ -123,6 +130,27 @@ class RouterClient:
         self._host = host.rstrip("/")
         self._password = password
         self._timeout = timeout
+
+    async def mark_read(self, sms: Sms, kick: bool = False, max_pages: int = 100) -> bool:
+        """Mark one message as read on the router. Return False if it is no longer in the router's inbox."""
+        async with httpx.AsyncClient(
+            headers={"Referer": self._host + "/"}, timeout=self._timeout
+        ) as http:
+            session = await self._login(http, kick)
+            try:
+                for page in range(1, max_pages + 1):
+                    entries = await session.recv_entries(page)
+                    if not entries:
+                        return False
+                    for stack, msg in entries:
+                        if msg.uid == sms.uid:
+                            await session.mark_read(page, stack)
+                            return True
+                    if entries[-1][1].received_at < sms.received_at:
+                        return False  # The inbox is newest first, so the message would already have appeared
+                return False
+            finally:
+                await session.logout()
 
     async def poll(self, should_continue, kick: bool = False, max_pages: int = 5) -> PollResult:
         """Log in once, read the network status and the inbox (newest first, until should_continue(page_msgs) is False), then log out.
@@ -239,14 +267,27 @@ class _Session:
         except (httpx.HTTPError, ValueError) as exc:
             raise RouterError(f"Could not read data from the router: {exc!r}") from exc
 
-    async def recv_page(self, page: int) -> list[Sms]:
+    async def recv_entries(self, page: int) -> list[tuple[str, Sms]]:
         stack = "#0,0,0,0,0,0#0,0,0,0,0,0]"
         text = await self._cgi(
             [ACT_SET, ACT_GL],
             f"[LTE_SMS_RECVMSGBOX{stack}0,1\r\npageNumber={page}\r\n"
             f"[LTE_SMS_RECVMSGENTRY{stack}1,0\r\n",
         )
-        return parse_sms(text)
+        return parse_sms_entries(text)
+
+    async def recv_page(self, page: int) -> list[Sms]:
+        return [sms for _, sms in await self.recv_entries(page)]
+
+    async def mark_read(self, page: int, stack: str) -> None:
+        """Same request as the router's own inbox page: select the page, then set unread=0 on the entry."""
+        text = await self._cgi(
+            [ACT_SET, ACT_SET],
+            f"[LTE_SMS_RECVMSGBOX#0,0,0,0,0,0#0,0,0,0,0,0]0,1\r\npageNumber={page}\r\n"
+            f"[LTE_SMS_RECVMSGENTRY#{stack}#0,0,0,0,0,0]1,1\r\nunread=0\r\n",
+        )
+        if "[error]0" not in text:
+            raise RouterError(f"The router did not accept marking the message as read: {text[:100]!r}")
 
     async def network_status(self) -> dict:
         text = await self._cgi(

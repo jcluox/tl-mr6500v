@@ -21,6 +21,16 @@ class MessageStore:
              int(sms.unread), json.dumps(delivered), time.time()),
         ))
 
+    def get(self, message_id: int) -> Sms | None:
+        rows = self._db.query("SELECT * FROM messages WHERE id = ?", (message_id,))
+        if not rows:
+            return None
+        r = rows[0]
+        return Sms(r["idx"], r["sender"], r["content"], r["received_at"], bool(r["unread"]))
+
+    def mark_read(self, message_id: int) -> None:
+        self._db.execute("UPDATE messages SET unread = 0 WHERE id = ?", (message_id,))
+
     def clear(self) -> int:
         """Delete the message records in the database and return how many were deleted. Only this app's SQLite is touched, never the messages on the router."""
         return self._db.execute("DELETE FROM messages")
