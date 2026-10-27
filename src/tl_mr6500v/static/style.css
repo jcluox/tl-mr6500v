@@ -106,15 +106,28 @@ button:disabled { opacity: 0.55; cursor: default; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .toolbar label { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 14px; }
 
-/* Messages: timeline */
-.messages { margin-bottom: 14px; }
-.msg { display: grid; grid-template-columns: 7.5em 1fr; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
-.msg:first-child { border-top: 0; }
-.msg-time { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.msg-time b { display: block; color: var(--ink); font-weight: 600; }
-.msg-sender { font-weight: 700; }
+/* Messages: inbox list (one line per message, click to expand) */
+.messages { margin-bottom: 14px; border-top: 1px solid var(--line); }
+.msg { border-bottom: 1px solid var(--line); }
+.msg-row {
+  display: grid; grid-template-columns: 11em 1fr auto calc(var(--when-ch, 11) * 1.1ch); gap: 16px; align-items: baseline; width: 100%;
+  border: 0; border-radius: 0; padding: 7px 8px; text-align: left; font: inherit; background: transparent;
+}
+.msg-row:hover { background: var(--wash); }
+.msg-sender { position: relative; padding-left: 16px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.unread .msg-sender, .msg.unread .msg-preview, .msg.unread .msg-when { font-weight: 700; color: var(--ink); }
+.unread-dot { position: absolute; left: 0; top: 0.6em; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); }
+.msg-preview { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-when { text-align: right; white-space: nowrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.msg-detail { display: none; padding: 2px 8px 12px calc(11em + 24px); }
+.msg.open .msg-detail { display: block; }
+.msg.open .msg-preview { visibility: hidden; }
+.msg-meta { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; margin-top: 2px; }
-.badges { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.msg-row .badge { text-align: right; }
+.msg-row .badge.idle { grid-column: -2; }
+.msg-row .badges { display: grid; grid-template-columns: repeat(var(--slots, 1), 11em); gap: 0; }
 .badge { color: var(--ink-2); }
 .badge.ok { color: var(--signal); } .badge.ok::before { content: "✓ "; }
 .badge.fail { color: var(--alert); } .badge.fail::before { content: "✕ "; }
@@ -154,7 +167,9 @@ button:disabled { opacity: 0.55; cursor: default; }
   .topbar { flex-wrap: wrap; }
   .hero { flex-direction: column; align-items: flex-start; gap: 16px; }
   .fact + .fact { border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; margin-top: 16px; }
-  .msg { grid-template-columns: 1fr; gap: 4px; }
-  .msg-time b { display: inline; margin-right: 8px; }
+  .msg-row { grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .msg-preview { grid-column: 1 / -1; grid-row: 2; }
+  .msg-row .badges { display: flex; flex-wrap: wrap; gap: 4px 14px; grid-column: 1 / -1; grid-row: 3; }
+  .msg-detail { padding-left: 8px; }
   .log-row { grid-template-columns: 1fr; gap: 0; }
 }

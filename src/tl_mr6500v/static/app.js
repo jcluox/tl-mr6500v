@@ -173,28 +173,48 @@ function renderStatus(s) {
 
 // ---------- Messages ----------
 let messageCount = 0;
+let messageSlots = 1;
+let messageWhenCh = 5;
 
 function splitTime(received) {
   const [date, time = ""] = received.split(" ");
   return [date, time.slice(0, 5)];
 }
 
+// Today: time only; this year: month-day and time; earlier years: the full date and time
+function whenLabel(m) {
+  const [date, time] = splitTime(m.received_at);
+  const today = new Date().toLocaleDateString("sv");  // YYYY-MM-DD in local time, like the router's timestamps
+  if (date === today) return time;
+  return date.slice(0, 4) === today.slice(0, 4) ? `${date.slice(5)} ${time}` : `${date} ${time}`;
+}
+
+
 function messageCard(m) {
   const entries = Object.entries(m.delivered);
   const badges = (entries.length ? entries : [["", null]]).map(([name, ok]) =>
     ok === null
-      ? el("span", { class: "badge" }, t("badge.notPushed"))
+      ? el("span", { class: "badge idle" }, t("badge.notPushed"))
       : el("span", { class: `badge ${ok ? "ok" : "fail"}` }, t(ok ? "badge.delivered" : "badge.failed", { name })),
   );
   const [date, time] = splitTime(m.received_at);
-  return el("article", { class: "msg" },
-    el("div", { class: "msg-time" }, el("b", {}, time), date),
-    el("div", {},
-      el("div", { class: "msg-sender" }, m.sender),
+  const row = el("button", { class: "msg-row", type: "button", "aria-expanded": "false" },
+    el("span", { class: "msg-sender" }, m.unread ? el("i", { class: "unread-dot", title: t("msg.unread") }) : "", m.sender),
+    el("span", { class: "msg-preview" }, m.content),
+    el("span", { class: "badges" }, ...badges),
+    el("span", { class: "msg-when" }, whenLabel(m)),
+  );
+  const card = el("article", { class: m.unread ? "msg unread" : "msg" },
+    row,
+    el("div", { class: "msg-detail" },
+      el("div", { class: "msg-meta" }, `${date} ${time}`),
       el("div", { class: "msg-body" }, m.content),
-      el("div", { class: "badges" }, ...badges),
     ),
   );
+  row.addEventListener("click", () => {
+    row.setAttribute("aria-expanded", String(card.classList.toggle("open")));
+  });
+  return card;
 }
 
 async function loadMessages(append = false) {
@@ -203,6 +223,14 @@ async function loadMessages(append = false) {
   const limit = append ? PAGE_SIZE : Math.min(Math.max(messageCount, PAGE_SIZE), 200);
   const data = await api(`/api/messages?limit=${limit}&offset=${offset}`);
   const cards = data.items.map(messageCard);
+  // Give every provider a fixed column so the delivery results line up across rows
+  const slots = Math.max(1, ...data.items.map((m) => Object.keys(m.delivered).length));
+  $("messages-list").style.setProperty("--slots", append ? Math.max(slots, messageSlots) : slots);
+  messageSlots = Math.max(slots, append ? messageSlots : 0);
+  // Every row's time column is as wide as the longest label, so today's time and dated ones take the same space
+  const whenCh = Math.max(5, ...data.items.map((m) => whenLabel(m).length));
+  messageWhenCh = Math.max(whenCh, append ? messageWhenCh : 0);
+  $("messages-list").style.setProperty("--when-ch", messageWhenCh);
   if (append) $("messages-list").append(...cards);
   else $("messages-list").replaceChildren(...cards);
   messageCount = offset + data.items.length;
