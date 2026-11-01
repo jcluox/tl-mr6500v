@@ -53,11 +53,12 @@ def create_app(settings: Settings | None = None, router=None, providers=None) ->
             sessions=SessionStore(db, settings.session_days * 86400), throttle=LoginThrottle(),
         ).items():
             setattr(app.state, name, value)
-        task = asyncio.create_task(poller.run())
+        tasks = [asyncio.create_task(poller.run()), asyncio.create_task(poller.retry_loop())]
         log.info("Started. providers=%s, checking every %ss",
                  [p.name for p in active], runtime.get().poll_interval_seconds)
         yield
-        task.cancel()
+        for task in tasks:
+            task.cancel()
         db.close()
 
     app = FastAPI(title="TL-MR6500v SMS notifier", lifespan=lifespan)

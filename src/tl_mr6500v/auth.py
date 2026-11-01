@@ -74,3 +74,7 @@ def credentials_match(expected_user: str, expected_password: str, user: str, pas
     user_ok = hmac.compare_digest(expected_user.encode(), user.encode())
     password_ok = hmac.compare_digest(expected_password.encode(), password.encode())
     return user_ok and password_ok
+
+
+def password_matches(expected_password: str, password: str) -> bool:
+    return hmac.compare_digest(expected_password.encode(), password.encode())

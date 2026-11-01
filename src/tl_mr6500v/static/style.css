@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark;  /* Native controls (date picker, scrollbars) follow the theme */
   --ground: #eaeff2; --ink: #15232e; --ink-2: #50616e; --line: #c9d3da; --wash: #dfe6ea;
   --signal: #0b7a75; --amber: #9a6700; --alert: #c23a31; --on-signal: #fff; --on-alert: #fff;
   --sans: "Avenir Next", "Segoe UI", system-ui, "PingFang TC", "PingFang SC", "Hiragino Sans",
@@ -68,65 +69,183 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 
 .banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
   padding: 8px max(16px, calc((100% - 1040px) / 2 + 16px)); background: var(--alert); color: var(--on-alert); font-size: 14px;
 }
+.banner a { color: inherit; text-decoration: none; }
+.banner a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* "Mark as read" on the red banner: an outlined button in the banner's own colours */
+.banner-btn { margin-left: auto; padding: 2px 12px; border-color: currentColor; border-radius: 999px; font-size: 13px; color: inherit; }
+.banner-btn:hover { background: rgb(255 255 255 / 0.16); border-color: currentColor; }
+.banner :focus-visible { outline-color: currentColor; }
 
-/* Status strip: a one-line summary; details are on the Status tab */
-.hero, .tabs, .panel { width: min(1040px, 100%); margin-inline: auto; padding-inline: 16px; }
-.hero { display: flex; align-items: center; gap: 14px; padding-block: 14px; --state: var(--line); }
-.hero[data-state="ok"] { --state: var(--signal); }
-.hero[data-state="busy"] { --state: var(--amber); }
-.hero[data-state="down"], .hero[data-state="error"] { --state: var(--alert); }
-.bars { display: flex; align-items: flex-end; gap: 3px; height: 26px; flex: none; }
+/* Status band: one slim readout. The connection state is the only large element; the rest are small label/value cells in three groups */
+.band, .panel { width: min(1040px, 100%); margin-inline: auto; padding-inline: 16px; }
+.band {
+  display: flex; flex-wrap: wrap; align-items: center; row-gap: 12px; padding-block: 14px;
+  border-bottom: 1px solid var(--line); --state: var(--line);
+}
+.band[data-state="ok"] { --state: var(--signal); }
+.band[data-state="busy"] { --state: var(--amber); }
+.band[data-state="down"], .band[data-state="error"] { --state: var(--alert); }
+.band-main { display: flex; align-items: center; gap: 14px; padding-right: 24px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 30px; flex: none; }
 .bars i { width: 6px; border-radius: 1px; background: var(--line); }
 .bars i:nth-child(1) { height: 25%; } .bars i:nth-child(2) { height: 50%; }
 .bars i:nth-child(3) { height: 75%; } .bars i:nth-child(4) { height: 100%; }
 .bars i.on { background: var(--state); }
-.hero-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; min-width: 0; }
 .hero-main { font-size: 20px; line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; color: var(--state); }
-.hero[data-state="unknown"] .hero-main { color: var(--ink-2); }
-.hero-sub { color: var(--ink-2); font-size: 14px; }
-.hero-ip { font-family: var(--mono); font-size: 14px; }
+.band[data-state="unknown"] .hero-main { color: var(--ink-2); }
+.hero-sub { color: var(--ink-2); font-size: 13px; line-height: 1.35; }
+.band-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; padding: 2px 0 2px 22px; margin-right: 22px; border-left: 1px solid var(--line); }
+.band-group:last-child { margin-right: 0; }
+.band-group:empty { display: none; }
+.cell dt { font-size: 12px; line-height: 1.3; color: var(--ink-2); white-space: nowrap; }
+.cell dd { font-size: 15px; line-height: 1.4; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cell dd a { color: inherit; text-decoration: none; }
+/* Round "+" at the end of the same row; it turns into "−" when the details are open. The name lives in aria-label and title */
+.band-toggle { position: relative; flex: none; margin-left: auto; width: 30px; height: 30px; padding: 0; border-radius: 50%; color: var(--ink-2); }
+.band-toggle:hover { color: var(--ink); }
+.band-toggle::before, .band-toggle::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 12px; height: 1.6px; margin: -0.8px 0 0 -6px;
+  border-radius: 1px; background: currentColor;
+}
+.band-toggle::after { transform: rotate(90deg); transition: transform 0.15s; }
+.band-toggle[aria-expanded="true"]::after { transform: rotate(0deg); }
+@media (prefers-reduced-motion: reduce) { .band-toggle::after { transition: none; } }
+.band-details {
+  flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 22px;
+  margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.band-details .cell dd { white-space: normal; overflow-wrap: anywhere; }
+.band-details .wide { grid-column: span 2; }
+.cell dd.status-off a { text-decoration: underline; text-underline-offset: 3px; }
 
-/* Status tab: three columns of data */
-.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; }
-.fact { padding: 4px 24px 4px 0; }
-.fact + .fact { border-left: 1px solid var(--line); padding-left: 24px; }
-.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 14px; font-size: 14px; }
-.kv dt { color: var(--ink-2); }
-.kv dd { text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.fact .small { margin-top: 8px; }
+/* Top bar icons */
+.brand { color: inherit; text-decoration: none; }
+.icon-btn {
+  position: relative; display: inline-grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line);
+  border-radius: 4px; color: var(--ink-2); text-decoration: none;
+}
+.icon-btn:hover { border-color: var(--ink-2); color: var(--ink); }
+.icon-btn[aria-current="page"] { color: var(--signal); border-color: var(--signal); }
+.count-badge {
+  position: absolute; top: -7px; right: -7px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--alert); color: var(--on-alert); font-size: 11px; font-weight: 700; line-height: 17px; text-align: center;
+}
 
-/* Tabs */
-.tabs-wrap { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.tabs { display: flex; gap: 22px; overflow-x: auto; }
-.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 12px 0; color: var(--ink-2); }
-.tabs button.active { color: var(--ink); font-weight: 600; border-bottom-color: var(--signal); }
-.panel { padding-block: 18px 48px; }
+/* Back-to-top button: floats at the bottom right of the main page once the top of the messages has scrolled out of view.
+   The sticky top bar would cover whatever we scroll to, so the scroll targets keep a margin below it */
+.to-top {
+  position: fixed; z-index: 2; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom));
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  background: var(--ground); color: var(--ink-2); border-color: var(--line);
+}
+.to-top:hover { color: var(--signal); border-color: var(--signal); }
+#messages-top, .messages { scroll-margin-top: 84px; }
+
+/* Sub pages (App Log, Settings) */
+.back { display: inline-block; margin-bottom: 6px; color: var(--ink-2); font-size: 14px; text-decoration: none; }
+.back:hover { color: var(--ink); }
+.page-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 14px; }
+.page-title .muted { font-weight: 400; font-size: 15px; }
+
+.panel { padding-block: 22px 48px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .toolbar label { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 14px; }
 
-/* Messages: timeline */
-.messages { margin-bottom: 14px; }
-.msg { display: grid; grid-template-columns: 7.5em 1fr; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
-.msg:first-child { border-top: 0; }
-.msg-time { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.msg-time b { display: block; color: var(--ink); font-weight: 600; }
-.msg-sender { font-weight: 700; }
+/* Messages: inbox list (one line per message, click to expand) */
+.messages { margin-bottom: 14px; border-top: 1px solid var(--line); }
+.msg { border-bottom: 1px solid var(--line); }
+.msg-row {
+  display: grid; grid-template-columns: 11em 1fr auto calc(var(--when-ch, 11) * 1.1ch); gap: 16px; align-items: baseline; width: 100%;
+  border: 0; border-radius: 0; padding: 7px 8px; text-align: left; font: inherit; background: transparent;
+}
+.msg-row:hover { background: var(--wash); }
+.msg-sender { position: relative; padding-left: 16px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.unread .msg-sender, .msg.unread .msg-preview, .msg.unread .msg-when { font-weight: 700; color: var(--ink); }
+.unread-dot { position: absolute; left: 0; top: 0.6em; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); }
+.msg-preview { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-when { text-align: right; white-space: nowrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.msg-detail { display: none; padding: 2px 8px 12px calc(11em + 24px); }
+.msg.open .msg-detail { display: block; }
+.msg.open .msg-preview { visibility: hidden; }
+.msg-meta { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; margin-top: 2px; }
-.badges { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.msg-row .badge { text-align: right; }
+.msg-row .badge.idle { grid-column: -2; }
+.msg-row .badges { display: grid; grid-template-columns: repeat(var(--slots, 1), 11em); gap: 0; }
 .badge { color: var(--ink-2); }
 .badge.ok { color: var(--signal); } .badge.ok::before { content: "✓ "; }
 .badge.fail { color: var(--alert); } .badge.fail::before { content: "✕ "; }
 
+/* Message filter: one search bar that holds the keyword and the time range, and lights up as a whole when focused */
+.filter-bar {
+  display: flex; flex-wrap: wrap; align-items: stretch; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--wash); transition: border-color 0.15s, box-shadow 0.15s;
+}
+.filter-bar:focus-within {
+  border-color: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 22%, transparent);
+}
+.filter-bar input { border: 0; border-radius: 0; background: transparent; padding: 0; font-size: 15px; }
+.filter-bar :focus-visible { outline: none; }
+.search-field { flex: 1 1 15em; display: flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 0; color: var(--ink-2); }
+.search-field input { flex: 1; min-width: 0; height: 42px; color: var(--ink); }
+.search-field input::placeholder { color: var(--ink-2); opacity: 0.8; }
+.range { display: flex; align-items: center; gap: 4px; padding: 0 8px 0 14px; border-left: 1px solid var(--line); }
+.range label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.range input { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; height: 42px; }
+.range i { width: 8px; height: 1px; background: var(--ink-2); margin: 0 6px; flex: none; }
+.filter-bar .reset {
+  border: 0; border-left: 1px solid var(--line); border-radius: 0 7px 7px 0; padding: 0 16px; font-size: 14px; color: var(--signal); font-weight: 600;
+}
+.filter-bar .reset:hover { background: var(--ground); }
+.filter-bar .reset:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.tool-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 20px; margin: 10px 0 18px; }
+.tool-row .count { margin-right: 8px; color: var(--signal); font-variant-numeric: tabular-nums; }
+.records { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.records button { padding: 3px 11px; font-size: 13px; color: var(--ink-2); border-radius: 999px; }
+.records button:hover { color: var(--ink); }
+button.link { border: 0; padding: 0; background: none; color: var(--signal); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Pager */
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-top: 16px; }
+.page-size { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.page-size select { padding: 3px 8px; font-size: 13px; color: var(--ink); }
+.page-nav { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.page-nav button { min-width: 32px; height: 32px; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.page-nav button[aria-current="page"] { background: var(--signal); border-color: var(--signal); color: var(--on-signal); font-weight: 600; }
+.page-nav .gap { padding: 0 4px; color: var(--ink-2); }
+
+/* Deleting one message also deletes it on the router, so it looks different from the neutral "clear records" button */
+button.danger { border-color: var(--alert); color: var(--alert); }
+button.danger:hover { border-color: var(--alert); background: var(--wash); }
+button.danger.primary { background: var(--alert); color: var(--on-alert); }
+.msg-actions { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.msg-hint { font-size: 13px; color: var(--ink-2); }
+dialog {
+  width: min(420px, calc(100% - 32px)); padding: 20px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--ground); color: var(--ink);
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog form { display: grid; gap: 12px; }
+dialog label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.danger-dialog { border-color: var(--alert); }
+.danger-dialog h2 { color: var(--alert); margin-bottom: 0; }
+.dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* Log */
 .logs { font: 12.5px/1.55 var(--mono); border-top: 1px solid var(--line); }
-.log-row { display: grid; grid-template-columns: 13em 5.5em 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.log-row { display: grid; grid-template-columns: 13em 5.5em 1fr; gap: 8px; padding: 4px 0 4px 10px; border-bottom: 1px solid var(--line); }
 .log-row .t { color: var(--ink-2); white-space: nowrap; }
 .log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-row.WARNING .lv { color: var(--amber); font-weight: 700; }
 .log-row.ERROR .lv, .log-row.CRITICAL .lv { color: var(--alert); font-weight: 700; }
 .log-row.ERROR, .log-row.CRITICAL { background: var(--wash); }
+/* Errors that have not been marked as read: a red edge and bolder text (the history stays, only this flag clears) */
+.log-row.unread { box-shadow: inset 3px 0 0 var(--alert); }
+.log-row.unread .log-text { font-weight: 700; }
 
 /* Settings: switch rows */
 .settings { display: grid; max-width: 620px; }
@@ -134,6 +253,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .settings > :last-child { border-bottom: 0; }
 .field { display: grid; gap: 4px; }
 .field input { width: 8em; }
+.field select { justify-self: start; min-width: 12em; }
 .check { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; cursor: pointer; }
 .check small { display: block; margin-top: 2px; }
 .check input {
@@ -152,9 +272,25 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 @media (max-width: 600px) {
   .topbar { flex-wrap: wrap; }
-  .hero { flex-direction: column; align-items: flex-start; gap: 16px; }
-  .fact + .fact { border-left: 0; border-top: 1px solid var(--line); padding: 16px 0 0; margin-top: 16px; }
-  .msg { grid-template-columns: 1fr; gap: 4px; }
-  .msg-time b { display: inline; margin-right: 8px; }
+  .spacer { flex: 1 1 100%; height: 0; }  /* Title and status on the first row, all the buttons together on the second */
+  /* Phones: every cell sits in one grid, so the band stays short instead of stacking three groups */
+  .band { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px 10px; }
+  .band-main { grid-column: 1 / -2; padding-right: 0; }
+  .band-group { display: contents; }
+  #messages-top, .messages { scroll-margin-top: 124px; }  /* The top bar wraps to two rows on phones */
+  .band-toggle { grid-column: -2 / -1; grid-row: 1; justify-self: end; align-self: start; margin-left: 0; }
+  .band-details { grid-column: 1 / -1; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px 10px; }
+  .band-details .wide { grid-column: 1 / -1; }
+  .page-nav { margin-left: 0; flex: 1 1 100%; }
+  .msg-row { grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .msg-preview { grid-column: 1 / -1; grid-row: 2; }
+  .msg-row .badges { display: flex; flex-wrap: wrap; gap: 4px 14px; grid-column: 1 / -1; grid-row: 3; }
+  .msg-detail { padding-left: 8px; }
+  .range { flex: 1 1 100%; flex-direction: column; align-items: stretch; gap: 0; border-left: 0; border-top: 1px solid var(--line); padding: 0 14px; }
+  .range i { display: none; }
+  .range label { justify-content: space-between; }
+  .range label + i + label { border-top: 1px solid var(--line); }
+  .range input { min-width: 0; text-align: right; }
+  .filter-bar .reset { flex: 1 1 100%; height: 38px; border-left: 0; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; }
   .log-row { grid-template-columns: 1fr; gap: 0; }
 }

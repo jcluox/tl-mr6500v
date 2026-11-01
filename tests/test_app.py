@@ -41,6 +41,10 @@ def login(client, password="s3cret"):
     return client.post("/api/auth/login", json={"username": "admin", "password": password})
 
 
+def enable_edit(client, password="s3cret"):
+    return client.put("/api/settings", json={"allow_edit_messages": True, "edit_password": password})
+
+
 def test_parse_network_exposes_only_network_fields():
     net = parse_network(NETWORK_RAW)
     assert net["connected"] and net["ipv4"] == "10.0.0.2" and net["signal"] == 3
@@ -132,6 +136,44 @@ def test_logs_endpoint_filters_by_level(env):
     assert client.get("/api/status").json()["errors_24h"] >= 1
 
 
+def test_errors_can_be_marked_as_read(env, tmp_path):
+    from tl_mr6500v.logging_setup import count_unread_errors, get_errors_ack
+
+    client, router, _ = env
+    assert client.post("/api/errors/ack").status_code == 401
+    login(client)
+    status = client.get("/api/status").json()
+    assert status["errors_unread"] == 0 and status["errors_ack_at"] == 0
+
+    logging.getLogger("tl_mr6500v.test").error("first problem")
+    status = client.get("/api/status").json()
+    assert status["errors_unread"] == status["errors_24h"] >= 1
+
+    acked_at = client.post("/api/errors/ack").json()["acked_at"]
+    status = client.get("/api/status").json()
+    assert status["errors_unread"] == 0 and status["errors_ack_at"] == acked_at
+    assert status["errors_24h"] >= 1  # The history is kept, only the "unread" flag is cleared
+    assert any("first problem" in l["message"] for l in client.get("/api/logs?level=ERROR").json())
+
+    # Opening or refreshing anything does not clear it by itself, and a new error shows up as unread again
+    logging.getLogger("tl_mr6500v.test").error("second problem")
+    assert client.get("/api/status").json()["errors_unread"] == 1
+
+    # Kept in SQLite: still there for a fresh connection, and it only covers what was logged before it
+    db = Database(tmp_path / "data" / "app.db")
+    assert get_errors_ack(db) == acked_at
+    assert count_unread_errors(db, acked_at) == 1
+
+
+def test_marking_errors_read_does_not_hide_the_current_error(env):
+    client, router, _ = env
+    login(client)
+    client.post("/api/poll")
+    client.app.state.poller.last_error = "Could not connect to the router"
+    client.post("/api/errors/ack")
+    assert client.get("/api/router").json()["error"] == "Could not connect to the router"
+
+
 def test_lan_access_rules():
     allow = lambda host, lan: is_allowed(host, LOCAL, lan)
     assert allow("127.0.0.1", False) and allow("::1", False) and allow("::ffff:127.0.0.1", False)
@@ -193,6 +235,139 @@ def test_import_existing_saves_history_without_pushing(env):
     assert client.post("/api/poll").json()["new"] == []  # Imported messages are not treated as new
 
 
+def test_open_message_marks_it_read_on_router_and_in_history(env):
+    client, router, _ = env
+    login(client)
+    enable_edit(client)
+    client.post("/api/poll")
+    router.pages = [[sms(5), sms(4)]]
+    client.post("/api/messages/import")
+    item = next(m for m in client.get("/api/messages?limit=200").json()["items"] if m["index"] == 5)
+    assert item["unread"]
+    assert client.post(f"/api/messages/{item['id']}/read").json() == {"read": True, "synced": "router"}
+    assert router.marked == [sms(5).uid]
+    items = client.get("/api/messages?limit=200").json()["items"]
+    assert not next(m for m in items if m["index"] == 5)["unread"]
+    # Already read: the router is not contacted again
+    assert client.post(f"/api/messages/{item['id']}/read").json()["synced"] == "local"
+    assert router.marked == [sms(5).uid]
+    assert client.post("/api/messages/99999/read").status_code == 404
+
+
+def test_mark_read_when_message_is_gone_from_router_still_marks_history(env):
+    client, router, _ = env
+    login(client)
+    enable_edit(client)
+    client.post("/api/poll")
+    router.missing = True
+    item = client.get("/api/messages?limit=1").json()["items"][0]
+    assert client.post(f"/api/messages/{item['id']}/read").json()["synced"] == "missing"
+    assert not client.get("/api/messages?limit=1").json()["items"][0]["unread"]
+
+
+def test_edit_switch_is_off_by_default_and_needs_the_password_to_turn_on(env, tmp_path):
+    client, *_ = env
+    login(client)
+    assert client.get("/api/settings").json()["allow_edit_messages"] is False
+    assert client.get("/api/messages").json()["editable"] is False
+
+    assert client.put("/api/settings", json={"allow_edit_messages": True}).json()["detail"] == "password_required"
+    resp = client.put("/api/settings", json={"allow_edit_messages": True, "edit_password": "nope"})
+    assert (resp.status_code, resp.json()["detail"]) == (403, "wrong_password")
+    assert client.get("/api/settings").json()["allow_edit_messages"] is False
+    # Other settings never need the password
+    assert client.put("/api/settings", json={"notify_errors": True}).status_code == 200
+
+    assert enable_edit(client).json()["allow_edit_messages"] is True
+    assert client.get("/api/messages").json()["editable"] is True
+    assert "edit_password" not in client.get("/api/settings").json()
+    # Saving again while it is already on needs no password, and turning it off never does
+    assert client.put("/api/settings", json={"allow_edit_messages": True}).status_code == 200
+    assert client.put("/api/settings", json={"allow_edit_messages": False}).json()["allow_edit_messages"] is False
+
+    # The switch is kept in SQLite, the password is not
+    enable_edit(client)
+    db = Database(tmp_path / "data" / "app.db")
+    assert SettingsStore(db, AppSettings()).get().allow_edit_messages is True
+
+
+def test_wrong_edit_password_is_throttled(env):
+    client, *_ = env
+    login(client)
+    for _ in range(5):
+        assert enable_edit(client, "nope").status_code == 403
+    assert enable_edit(client).status_code == 429  # Even the right password waits out the lock
+    client.post("/api/auth/logout")
+    assert login(client).status_code == 200  # The sign-in has its own counter
+
+
+def test_read_only_mode_blocks_mark_read_and_delete(env):
+    client, router, _ = env
+    login(client)
+    client.post("/api/poll")
+    item = client.get("/api/messages?limit=1").json()["items"][0]
+    assert client.post(f"/api/messages/{item['id']}/read").json()["detail"] == "edit_disabled"
+    resp = client.delete(f"/api/messages/{item['id']}")
+    assert (resp.status_code, resp.json()["detail"]) == (403, "edit_disabled")
+    assert not hasattr(router, "marked") and not hasattr(router, "deleted")
+    assert client.get("/api/messages?limit=1").json()["items"][0]["unread"] == item["unread"]
+    assert client.get("/api/status").json()["messages_total"] >= 1
+
+
+def test_delete_message_removes_it_from_router_and_history_without_a_password(env):
+    client, router, rec = env
+    assert client.delete("/api/messages/1").status_code == 401
+    login(client)
+    enable_edit(client)
+    client.post("/api/poll")
+    router.pages = [[sms(3), sms(2), sms(1)]]
+    client.post("/api/poll")
+    items = client.get("/api/messages?limit=200").json()["items"]
+    target, other = items[0], items[1]
+    total = len(items)
+
+    assert client.delete(f"/api/messages/{target['id']}").json() == {"deleted": True, "on_router": True}
+    assert router.deleted == [sms(target["index"]).uid]
+    remaining = client.get("/api/messages?limit=200").json()
+    assert remaining["total"] == total - 1 and target["id"] not in [m["id"] for m in remaining["items"]]
+    assert other["id"] in [m["id"] for m in remaining["items"]]
+    assert client.delete(f"/api/messages/{other['id']}").status_code == 200  # A second delete needs no password either
+    assert client.delete(f"/api/messages/{target['id']}").status_code == 404
+    sent_before = len(rec.sent)
+    assert client.post("/api/poll").json()["new"] == []  # A deleted message is not pushed again
+    assert len(rec.sent) == sent_before
+
+
+def test_delete_message_gone_from_router_still_removes_history(env):
+    client, router, _ = env
+    login(client)
+    enable_edit(client)
+    client.post("/api/poll")
+    router.missing = True
+    item = client.get("/api/messages?limit=1").json()["items"][0]
+    total = client.get("/api/status").json()["messages_total"]
+    assert client.delete(f"/api/messages/{item['id']}").json() == {"deleted": True, "on_router": False}
+    assert client.get("/api/status").json()["messages_total"] == total - 1
+
+
+def test_delete_message_keeps_history_when_router_fails(env):
+    from tl_mr6500v.router import RouterBusy, RouterError
+
+    client, router, _ = env
+    login(client)
+    enable_edit(client)
+    client.post("/api/poll")
+    item = client.get("/api/messages?limit=1").json()["items"][0]
+    total = client.get("/api/status").json()["messages_total"]
+
+    for exc, status in ((RouterBusy("busy"), 409), (RouterError("down"), 502)):
+        async def fail(sms, kick=False, exc=exc):
+            raise exc
+        router.delete_message = fail
+        assert client.delete(f"/api/messages/{item['id']}").status_code == status
+        assert client.get("/api/status").json()["messages_total"] == total
+
+
 def test_import_limit_keeps_newest_and_marks_all_seen(tmp_path):
     from test_core import make_poller
 
@@ -217,11 +392,52 @@ def test_clear_messages_only_touches_history(env):
 
     deleted = client.delete("/api/messages").json()["deleted"]
     assert deleted >= 1
-    assert client.get("/api/messages").json() == {"total": 0, "items": []}
+    assert client.get("/api/messages").json() == {"total": 0, "items": [], "editable": False, "max_retries": 3}
     assert client.get("/api/status").json()["messages_total"] == 0
     sent_before = len(rec.sent)
     assert client.post("/api/poll").json()["new"] == []  # Not pushed again after clearing
     assert len(rec.sent) == sent_before
+
+
+def test_resend_endpoint_pushes_only_failed_providers(tmp_path):
+    from test_core import Flaky
+
+    router, rec, flaky = FakeRouter([[sms(1)]]), Recorder(), Flaky()
+    settings = Settings(tplink_password="x", admin_password="s3cret", data_dir=tmp_path / "data",
+                        log_dir=tmp_path / "logs", poll_interval_seconds=3600, _env_file=None)
+    with TestClient(create_app(settings, router=router, providers=[rec, flaky]), client=("127.0.0.1", 50000)) as client:
+        assert client.post("/api/messages/1/resend").status_code == 401
+        login(client)
+        client.post("/api/poll")
+        router.pages = [[sms(2), sms(1)]]
+        client.post("/api/poll")
+        item = client.get("/api/messages").json()["items"][0]
+        assert item["delivered"] == {"rec": True, "flaky": False} and item["retries"] == 0
+
+        assert client.post("/api/messages/999/resend").status_code == 404
+        flaky.down = False  # Works with the edit switch off
+        done = client.post(f"/api/messages/{item['id']}/resend")
+        assert done.json() == {"delivered": {"rec": True, "flaky": True}, "retries": 1}
+        assert len(rec.sent) == 1 and len(flaky.sent) == 1
+        assert client.post(f"/api/messages/{item['id']}/resend").status_code == 409
+
+
+def test_database_from_before_resend_is_migrated(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE NOT NULL, idx INTEGER NOT NULL, "
+        "sender TEXT NOT NULL, content TEXT NOT NULL, received_at TEXT NOT NULL, unread INTEGER NOT NULL, "
+        "delivered TEXT NOT NULL, notified_at REAL NOT NULL)"
+    )
+    conn.execute("INSERT INTO messages VALUES (1, 'u', 1, 'a', 'hi', '2026-01-01 00:00:00', 0, '{\"rec\": false}', 1.0)")
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    row = db.query("SELECT retries, last_attempt, content FROM messages")[0]
+    assert (row["retries"], row["last_attempt"], row["content"]) == (0, None, "hi")
 
 
 def test_i18n_dictionaries_are_complete():
@@ -246,7 +462,7 @@ def test_i18n_dictionaries_are_complete():
     for lang, lang_keys in keys.items():
         assert set(lang_keys) == set(keys["en"]), f"keys of {lang} do not match en"
 
-    used = set(re.findall(r'data-i18n(?:-label)?="([\w.]+)"', (static / "index.html").read_text()))
+    used = set(re.findall(r'data-i18n(?:-label|-placeholder)?="([\w.]+)"', (static / "index.html").read_text()))
     used |= set(re.findall(r'\bt\(\s*"([\w.]+)"', (static / "app.js").read_text()))
     used |= {f"pill.{s}" for s in ("ok", "busy", "error", "unknown")} | {"net.type.0", "net.type.3"}
     assert used <= set(keys["en"]), f"missing translations: {used - set(keys['en'])}"
