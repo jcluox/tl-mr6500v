@@ -31,6 +31,9 @@ class MessageStore:
     def mark_read(self, message_id: int) -> None:
         self._db.execute("UPDATE messages SET unread = 0 WHERE id = ?", (message_id,))
 
+    def delete(self, message_id: int) -> None:
+        self._db.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+
     def clear(self) -> int:
         """Delete the message records in the database and return how many were deleted. Only this app's SQLite is touched, never the messages on the router."""
         return self._db.execute("DELETE FROM messages")

@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from logging.handlers import RotatingFileHandler
@@ -53,6 +54,33 @@ def count_recent_errors(db: Database, window_seconds: float = 86400) -> int:
     return db.query(
         "SELECT COUNT(*) AS n FROM logs WHERE levelno >= ? AND created >= ?",
         (logging.ERROR, time.time() - window_seconds),
+    )[0]["n"]
+
+
+ERRORS_ACK_KEY = "errors_ack_at"
+
+
+def get_errors_ack(db: Database) -> float:
+    """When the errors were last marked as read (epoch seconds; 0 if never). Kept in the settings table, shared by every browser."""
+    rows = db.query("SELECT value FROM settings WHERE key = ?", (ERRORS_ACK_KEY,))
+    return float(json.loads(rows[0]["value"])) if rows else 0.0
+
+
+def ack_errors(db: Database) -> float:
+    """Mark every error logged so far as read. Later errors count as unread again."""
+    now = time.time()
+    db.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (ERRORS_ACK_KEY, json.dumps(now)),
+    )
+    return now
+
+
+def count_unread_errors(db: Database, ack_at: float, window_seconds: float = 86400) -> int:
+    """Errors in the window that were logged after the last "mark as read"."""
+    since = max(time.time() - window_seconds, ack_at)
+    return db.query(
+        "SELECT COUNT(*) AS n FROM logs WHERE levelno >= ? AND created > ?", (logging.ERROR, since)
     )[0]["n"]
 
 

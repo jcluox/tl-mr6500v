@@ -113,6 +113,21 @@ class Poller:
         log.info("Marked message %s from %s as read%s", sms.uid, sms.sender, "" if found else " (not on the router anymore)")
         return "router" if found else "missing"
 
+    async def delete_message(self, message_id: int) -> str | None:
+        """Delete a message from the router's inbox, then from the history. Return None if the message is unknown, otherwise
+        "router" (deleted on both) or "missing" (no longer in the router's inbox; deleted here only).
+
+        If the router cannot be reached, RouterBusy / RouterError is raised and the history is left unchanged.
+        The message stays in seen.json, so it is never pushed again."""
+        sms = self.history.get(message_id)
+        if sms is None:
+            return None
+        async with self._lock:
+            found = await self.router.delete_message(sms, kick=self.settings.get().kick_existing_login)
+        self.history.delete(message_id)
+        log.info("Deleted message %s from %s%s", sms.uid, sms.sender, "" if found else " (not on the router anymore)")
+        return "router" if found else "missing"
+
     async def run(self) -> None:
         while True:
             self.wake.clear()

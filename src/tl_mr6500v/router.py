@@ -27,7 +27,7 @@ from .models import Sms
 log = logging.getLogger(f"{LOGGER_NAME}.router")
 
 RSA_BLOCK = 64
-ACT_GET, ACT_SET, ACT_GL = 1, 2, 5
+ACT_GET, ACT_SET, ACT_DEL, ACT_GL = 1, 2, 4, 5
 # When forcing a login, if the other user's request is still being handled (isBusy=1), the web interface waits a moment before logging in
 KICK_BUSY_RETRIES = 2
 _ENTRY_RE = re.compile(
@@ -133,6 +133,14 @@ class RouterClient:
 
     async def mark_read(self, sms: Sms, kick: bool = False, max_pages: int = 100) -> bool:
         """Mark one message as read on the router. Return False if it is no longer in the router's inbox."""
+        return await self._act_on(sms, "mark_read", kick, max_pages)
+
+    async def delete_message(self, sms: Sms, kick: bool = False, max_pages: int = 100) -> bool:
+        """Delete one message from the router's inbox. Return False if it is no longer there."""
+        return await self._act_on(sms, "delete_entry", kick, max_pages)
+
+    async def _act_on(self, sms: Sms, action: str, kick: bool, max_pages: int) -> bool:
+        """Find the message in the router's inbox and run the session's `action` on it (page, stack)."""
         async with httpx.AsyncClient(
             headers={"Referer": self._host + "/"}, timeout=self._timeout
         ) as http:
@@ -144,7 +152,7 @@ class RouterClient:
                         return False
                     for stack, msg in entries:
                         if msg.uid == sms.uid:
-                            await session.mark_read(page, stack)
+                            await getattr(session, action)(page, stack)
                             return True
                     if entries[-1][1].received_at < sms.received_at:
                         return False  # The inbox is newest first, so the message would already have appeared
@@ -288,6 +296,16 @@ class _Session:
         )
         if "[error]0" not in text:
             raise RouterError(f"The router did not accept marking the message as read: {text[:100]!r}")
+
+    async def delete_entry(self, page: int, stack: str) -> None:
+        """Select the page, then delete the entry (the router's own inbox page sends the same kind of request)."""
+        text = await self._cgi(
+            [ACT_SET, ACT_DEL],
+            f"[LTE_SMS_RECVMSGBOX#0,0,0,0,0,0#0,0,0,0,0,0]0,1\r\npageNumber={page}\r\n"
+            f"[LTE_SMS_RECVMSGENTRY#{stack}#0,0,0,0,0,0]1,0\r\n",
+        )
+        if "[error]0" not in text:
+            raise RouterError(f"The router did not accept deleting the message: {text[:100]!r}")
 
     async def network_status(self) -> dict:
         text = await self._cgi(

@@ -42,6 +42,10 @@ class FakeRouter:
         self.marked = [*getattr(self, "marked", []), sms.uid]
         return not getattr(self, "missing", False)
 
+    async def delete_message(self, sms, kick=False):
+        self.deleted = [*getattr(self, "deleted", []), sms.uid]
+        return not getattr(self, "missing", False)
+
 
 class Recorder(Provider):
     name = "rec"

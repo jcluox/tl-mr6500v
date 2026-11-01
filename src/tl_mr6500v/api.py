@@ -5,8 +5,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from .auth import COOKIE_NAME, credentials_match
-from .logging_setup import LOGGER_NAME, count_recent_errors, query_logs
+from .auth import COOKIE_NAME, credentials_match, password_matches
+from .logging_setup import (
+    LOGGER_NAME, ack_errors, count_recent_errors, count_unread_errors, get_errors_ack, query_logs,
+)
 from .router import RouterBusy, RouterError
 from .runtime_settings import SettingsUpdate
 
@@ -23,6 +25,11 @@ class LoginBody(BaseModel):
 def require_admin(request: Request) -> None:
     if not request.app.state.sessions.validate(request.cookies.get(COOKIE_NAME)):
         raise HTTPException(401, "Please sign in first")
+
+
+def require_editable(request: Request) -> None:
+    if not request.app.state.runtime.get().allow_edit_messages:
+        raise HTTPException(403, "edit_disabled")
 
 
 def _source(request: Request) -> str:
@@ -70,6 +77,7 @@ async def me(request: Request):
 async def status(request: Request):
     state = request.app.state
     poller = state.poller
+    ack_at = get_errors_ack(state.db)
     return {
         "server_time": time.time(),
         "ok": poller.last_error is None,
@@ -78,6 +86,8 @@ async def status(request: Request):
         "poll_interval_seconds": state.runtime.get().poll_interval_seconds,
         "providers": [p.name for p in poller.notifier.providers],
         "errors_24h": count_recent_errors(state.db),
+        "errors_unread": count_unread_errors(state.db, ack_at),
+        "errors_ack_at": ack_at,
         "messages_total": state.history.list(limit=0)["total"],
     }
 
@@ -96,7 +106,8 @@ async def router_status(request: Request):
 
 @api.get("/messages")
 async def messages(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
-    return request.app.state.history.list(limit, offset)
+    state = request.app.state
+    return {**state.history.list(limit, offset), "editable": state.runtime.get().allow_edit_messages}
 
 
 @api.delete("/messages")
@@ -110,6 +121,7 @@ async def clear_messages(request: Request):
 @api.post("/messages/{message_id}/read")
 async def mark_message_read(message_id: int, request: Request):
     """Mark a message as read on the router and in the history (used when the message is opened in the Dashboard)."""
+    require_editable(request)
     try:
         result = await request.app.state.poller.mark_read(message_id)
     except RouterBusy as exc:
@@ -119,6 +131,21 @@ async def mark_message_read(message_id: int, request: Request):
     if result is None:
         raise HTTPException(404, "Message not found")
     return {"read": True, "synced": result}
+
+
+@api.delete("/messages/{message_id}")
+async def delete_message(message_id: int, request: Request):
+    """Permanently delete one message from the router's inbox and from the history (needs the edit switch to be on)."""
+    require_editable(request)
+    try:
+        result = await request.app.state.poller.delete_message(message_id)
+    except RouterBusy as exc:
+        raise HTTPException(409, str(exc))
+    except RouterError as exc:
+        raise HTTPException(502, str(exc))
+    if result is None:
+        raise HTTPException(404, "Message not found")
+    return {"deleted": True, "on_router": result == "router"}
 
 
 @api.post("/messages/import")
@@ -142,6 +169,14 @@ async def logs(
     return query_logs(request.app.state.db, LEVELS[level], limit, before_id)
 
 
+@api.post("/errors/ack")
+async def acknowledge_errors(request: Request):
+    """Mark the errors logged so far as read, so the Dashboard stops flagging them. The log itself is kept."""
+    acked_at = ack_errors(request.app.state.db)
+    log.info("Errors marked as read")
+    return {"acked_at": acked_at}
+
+
 @api.get("/settings")
 async def get_settings(request: Request):
     return request.app.state.runtime.get()
@@ -150,6 +185,18 @@ async def get_settings(request: Request):
 @api.put("/settings")
 async def put_settings(body: SettingsUpdate, request: Request):
     state = request.app.state
+    if body.allow_edit_messages and not state.runtime.get().allow_edit_messages:
+        # Turning editing on needs the admin password once; turning it off, or changing other settings, does not
+        source = f"reauth:{_source(request)}"
+        if wait := state.throttle.retry_after(source):
+            raise HTTPException(429, f"Too many failed attempts. Try again in {wait} seconds")
+        if not body.edit_password:
+            raise HTTPException(403, "password_required")
+        if not password_matches(state.settings.admin_password, body.edit_password):
+            state.throttle.failed(source)
+            log.warning("Wrong password when turning on message editing, source=%s", _source(request))
+            raise HTTPException(403, "wrong_password")
+        state.throttle.succeeded(source)
     changes = state.runtime.update(body)
     if changes:
         log.info("Settings updated: %s", ", ".join(f"{k} {old}→{new}" for k, (old, new) in changes.items()))
