@@ -107,7 +107,8 @@ async def router_status(request: Request):
 @api.get("/messages")
 async def messages(request: Request, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     state = request.app.state
-    return {**state.history.list(limit, offset), "editable": state.runtime.get().allow_edit_messages}
+    return {**state.history.list(limit, offset), "editable": state.runtime.get().allow_edit_messages,
+            "max_retries": len(state.poller.retry_delays)}
 
 
 @api.delete("/messages")
@@ -131,6 +132,17 @@ async def mark_message_read(message_id: int, request: Request):
     if result is None:
         raise HTTPException(404, "Message not found")
     return {"read": True, "synced": result}
+
+
+@api.post("/messages/{message_id}/resend")
+async def resend_message(message_id: int, request: Request):
+    """Push a message again, only to the providers where it failed (works with the edit switch off)."""
+    result = await request.app.state.poller.resend(message_id)
+    if result is None:
+        raise HTTPException(404, "Message not found")
+    if not result["sent"]:
+        raise HTTPException(409, "nothing_to_resend")
+    return {"delivered": result["delivered"], "retries": result["retries"]}
 
 
 @api.delete("/messages/{message_id}")

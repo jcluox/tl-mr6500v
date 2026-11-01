@@ -222,7 +222,8 @@ button.link { border: 0; padding: 0; background: none; color: var(--signal); fon
 button.danger { border-color: var(--alert); color: var(--alert); }
 button.danger:hover { border-color: var(--alert); background: var(--wash); }
 button.danger.primary { background: var(--alert); color: var(--on-alert); }
-.msg-actions { margin-top: 10px; }
+.msg-actions { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.msg-hint { font-size: 13px; color: var(--ink-2); }
 dialog {
   width: min(420px, calc(100% - 32px)); padding: 20px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--ground); color: var(--ink);

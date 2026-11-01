@@ -68,6 +68,19 @@ class Broken(Provider):
         raise RuntimeError("boom")
 
 
+class Flaky(Provider):
+    """Fails while `down` is set; counts the sends that went through."""
+    name = "flaky"
+
+    def __init__(self, down=True):
+        self.down, self.sent = down, []
+
+    async def send_text(self, text):
+        if self.down:
+            raise RuntimeError("no network")
+        self.sent.append(text)
+
+
 def make_poller(tmp_path, router, providers):
     db = Database(tmp_path / "app.db")
     return Poller(router, Notifier(providers), SeenStore(tmp_path / "seen.json"),
@@ -151,3 +164,75 @@ def test_busy_skip_is_recorded_in_app_log(tmp_path):
         h.flush()
     assert "Skipping this check" in (tmp_path / "logs" / "app.log").read_text()
     assert "Skipping this check" not in (tmp_path / "logs" / "error.log").read_text()
+
+
+def pushed_with_failure(tmp_path, flaky):
+    """A poller that already pushed one new message while `flaky` was down, plus the recording provider."""
+    rec = Recorder()
+    router = FakeRouter([[sms(1)]])
+    poller = make_poller(tmp_path, router, [rec, flaky])
+    asyncio.run(poller.poll_once())
+    router.pages = [[sms(2), sms(1)]]
+    asyncio.run(poller.poll_once())
+    message = poller.history.list()["items"][0]
+    return poller, rec, message
+
+
+def test_resend_only_pushes_to_the_providers_that_failed(tmp_path):
+    flaky = Flaky()
+    poller, rec, message = pushed_with_failure(tmp_path, flaky)
+    assert message["delivered"] == {"rec": True, "flaky": False} and message["retries"] == 0
+    assert len(rec.sent) == 1
+
+    flaky.down = False
+    result = asyncio.run(poller.resend(message["id"]))
+    assert result == {"delivered": {"rec": True, "flaky": True}, "retries": 1, "sent": True}
+    assert len(flaky.sent) == 1 and len(rec.sent) == 1  # The provider that worked got no duplicate
+    assert asyncio.run(poller.resend(message["id"]))["sent"] is False  # Nothing left to resend
+    assert asyncio.run(poller.resend(9999)) is None
+
+
+def test_retry_waits_for_the_backoff_and_stops_after_the_last_one(tmp_path):
+    flaky = Flaky()
+    poller, rec, message = pushed_with_failure(tmp_path, flaky)
+    history = poller.history
+    notified = history._db.query("SELECT notified_at FROM messages")[0]["notified_at"]
+
+    assert history.pending_retries(poller.retry_delays, notified + 30) == []
+    assert [d[0] for d in history.pending_retries(poller.retry_delays, notified + 61)] == [message["id"]]
+
+    poller.retry_delays = (0, 0)
+    assert asyncio.run(poller.retry_pending()) == 1
+    assert asyncio.run(poller.retry_pending()) == 1
+    assert asyncio.run(poller.retry_pending()) == 0  # Used up; only the manual button is left
+    assert asyncio.run(poller.resend(message["id"]))["retries"] == 3
+
+
+def test_failed_retries_are_warnings_and_only_the_last_one_is_an_error(tmp_path):
+    flaky = Flaky()
+    poller, rec, message = pushed_with_failure(tmp_path, flaky)
+    poller.retry_delays = (0, 0)
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger = logging.getLogger("tl_mr6500v")
+    logger.addHandler(handler)
+    try:
+        asyncio.run(poller.retry_pending())
+        assert [r.levelname for r in records if "again failed" in r.getMessage()] == ["WARNING"]
+        assert not [r for r in records if r.levelno >= logging.ERROR]
+        asyncio.run(poller.retry_pending())
+    finally:
+        logger.removeHandler(handler)
+    assert [r.getMessage() for r in records if r.levelno >= logging.ERROR][-1].startswith("Gave up pushing")
+
+
+def test_imported_and_unconfigured_providers_are_not_retried(tmp_path):
+    flaky = Flaky()
+    poller, rec, message = pushed_with_failure(tmp_path, flaky)
+    poller.history.add(sms(7), {})  # Imported only
+    poller.notifier.providers.remove(flaky)  # No longer configured
+    poller.retry_delays = (0,)
+    assert asyncio.run(poller.retry_pending()) == 1  # Still "due", but nothing is sent
+    assert asyncio.run(poller.resend(message["id"]))["sent"] is False
+    assert flaky.sent == []

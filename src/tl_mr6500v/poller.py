@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 from .history import MessageStore
@@ -11,6 +12,10 @@ from .runtime_settings import SettingsStore
 from .state import SeenStore
 
 log = logging.getLogger(f"{LOGGER_NAME}.poller")
+
+# Seconds to wait after the last attempt before each automatic retry of a failed push (three retries)
+RETRY_DELAYS = (60, 300, 900)
+RETRY_CHECK_SECONDS = 60
 
 
 def _now() -> str:
@@ -25,6 +30,8 @@ class Poller:
         self.history, self.settings, self.import_limit = history, settings, import_limit
         self.wake = asyncio.Event()  # Set when settings change, so a new interval takes effect right away
         self._lock = asyncio.Lock()
+        self._resend_lock = asyncio.Lock()  # Automatic retries and the manual button never push the same message at the same time
+        self.retry_delays = RETRY_DELAYS
         self.last_poll_at: str | None = None  # Last successful check
         self.last_error: str | None = None
         # Router state: ok (last check succeeded) / busy (skipped because someone is logged in) / error / unknown (not checked yet)
@@ -127,6 +134,48 @@ class Poller:
         self.history.delete(message_id)
         log.info("Deleted message %s from %s%s", sms.uid, sms.sender, "" if found else " (not on the router anymore)")
         return "router" if found else "missing"
+
+    async def resend(self, message_id: int, manual: bool = True) -> dict | None:
+        """Push a message again, only to the providers where it failed. Return None if the message is unknown, otherwise
+        {"delivered": the merged result, "retries": attempts so far, "sent": False if nothing had failed}.
+
+        An automatic retry that fails is only a warning; the last automatic one logs a single error. A manual one always logs as a retry."""
+        async with self._resend_lock:
+            found = self.history.get_delivery(message_id)
+            if found is None:
+                return None
+            sms, delivered, retries = found
+            names = {n for n, ok in delivered.items() if not ok} & {p.name for p in self.notifier.providers}
+            if not names:
+                return {"delivered": delivered, "retries": retries, "sent": False}
+            outcome = await self.notifier.notify(sms, only=names, retry=True)
+            recorded = self.history.record_attempt(message_id, outcome)
+            if recorded is None:  # Deleted while the push was in flight
+                return None
+            delivered, retries = recorded
+            failed = sorted(n for n, ok in outcome.items() if not ok)
+            if not failed:
+                log.info("Pushed message %s again, now delivered to %s", sms.uid, sorted(outcome))
+            elif not manual and retries >= len(self.retry_delays):
+                log.error("Gave up pushing message %s to %s after %d retries", sms.uid, failed, retries)
+            else:
+                log.warning("Pushing message %s again failed for %s (attempt %d)", sms.uid, failed, retries)
+            return {"delivered": delivered, "retries": retries, "sent": True}
+
+    async def retry_pending(self) -> int:
+        """Retry every failed push whose wait time has passed. Return how many messages were tried."""
+        due = self.history.pending_retries(self.retry_delays, time.time())
+        for message_id, *_ in due:
+            await self.resend(message_id, manual=False)
+        return len(due)
+
+    async def retry_loop(self) -> None:
+        while True:
+            try:
+                await self.retry_pending()
+            except Exception:
+                log.exception("Unexpected error while retrying pushes")
+            await asyncio.sleep(RETRY_CHECK_SECONDS)
 
     async def run(self) -> None:
         while True:

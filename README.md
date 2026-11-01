@@ -25,7 +25,8 @@ Tested on one TL-MR6500v. Other models and firmware versions may behave differen
 3. When a new message arrives, it is sent to all enabled providers at once. If one provider fails, the others still get the message.
 4. Events (start-up, new messages and their delivery results, checks skipped because someone is logged in) are written to `logs/app.log`. Errors, such as push failures, also go to `logs/error.log`. The same log is also saved in SQLite so you can read it in the Dashboard.
 5. Messages that were already handled are remembered in `data/seen.json`, so nothing is pushed twice after a restart. **On the first start the app only records the existing messages. It does not push old ones.**
-6. Pushed messages (and messages imported on the first start), with each provider's delivery result, are saved in `data/app.db` and shown in the Dashboard.
+6. If a push fails (for example the network is down), the app tries again by itself, only for the provider that failed: 1, 5 and 15 minutes later. Failed retries are only warnings; after the third one fails, one error is logged. You can always push again by hand from the message in the Dashboard.
+7. Pushed messages (and messages imported on the first start), with each provider's delivery result, are saved in `data/app.db` and shown in the Dashboard.
 
 > If you are logged in to the router in a browser, the app notices this and skips that check by default, so it does not log you out. Messages that arrive in the meantime are pushed on a later check. You can change this in the Dashboard settings to force the login (which logs the other person out).
 
@@ -48,6 +49,7 @@ The Dashboard has three pages, and its language can be changed on the Settings p
 - **Messages**: the full text of each pushed message and each provider's delivery result, with the number of records in the title. The list is paged; choose how many messages per page (10, 20, 50 or 100), and the choice is remembered in the browser. The newest 200 messages are loaded at first; "Load more" fetches the next 200.
   - "Import existing messages from router" adds the latest `IMPORT_LIMIT` old messages from the router inbox to the records. They are only saved, not pushed, and are marked "Not pushed". The same import runs once on the first start.
   - "Clear Dashboard records" deletes only the records in the database. It never deletes messages on the router, and nothing is pushed again.
+  - "Push again" appears on a message where a provider failed. It pushes only to the provider(s) that failed, so the others get no duplicate. It works even when editing is off.
   - "Delete from router" (only when editing is turned on) permanently deletes one message from the router's inbox (SIM) **and** from the records, after a confirmation. It cannot be undone, and the message is never pushed again.
   - The filter above the list searches the text and sender, and optionally a time range. It only looks at the messages that are loaded (not the whole database); use "Load more" to include older ones. The results are paged too.
 
@@ -144,6 +146,7 @@ Except for `/health` and sign-in, every `/api/*` endpoint needs a login (cookie 
 | `GET /api/messages?limit&offset` | Message history (newest first) with each provider's delivery result, and `editable` (whether message editing is on) |
 | `DELETE /api/messages` | Delete the message records in the database (router messages are not touched) |
 | `DELETE /api/messages/{id}` | Permanently delete one message from the router and the history. `403 edit_disabled` unless message editing is on |
+| `POST /api/messages/{id}/resend` | Push a message again, only to the providers where it failed. `409 nothing_to_resend` if nothing failed. Works with message editing off |
 | `POST /api/messages/{id}/read` | Mark a message as read on the router and in the history. `403 edit_disabled` unless message editing is on |
 | `POST /api/messages/import` | Import the latest messages from the router inbox into the history (nothing is pushed) |
 | `GET /api/logs?level&limit&before_id` | App log; `level` is `INFO`, `WARNING` or `ERROR` |

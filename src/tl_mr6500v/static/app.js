@@ -245,6 +245,7 @@ $("ack-errors").addEventListener("click", ackErrors);
 let loadedMessages = [];  // Every message loaded so far (the filter only looks at these)
 let messagesTotal = 0;
 let messagesEditable = false;  // Settings switch: when off, messages are read-only
+let maxRetries = 3;  // Automatic retries of a failed push, as reported by the server
 let page = 1;
 let pageSize = (() => {
   try {
@@ -289,11 +290,21 @@ function messageCard(m) {
   );
   const card = el("article", { class: `msg${m.unread ? " unread" : ""}${openMessages.has(m.id) ? " open" : ""}` }, row, detail);
   row.setAttribute("aria-expanded", String(card.classList.contains("open")));
+  const actions = el("div", { class: "msg-actions" });
+  if (entries.some(([, ok]) => ok === false)) {
+    // Only the providers that failed are pushed again, so the ones that worked get no duplicate
+    const resend = el("button", { type: "button" }, t("resend.btn"));
+    resend.addEventListener("click", () => resendMessage(m, resend));
+    actions.append(resend, el("span", { class: "msg-hint" }, m.retries < maxRetries
+      ? t("resend.retrying", { n: m.retries, max: maxRetries })
+      : t("resend.gaveUp")));
+  }
   if (messagesEditable) {
     const del = el("button", { class: "danger", type: "button" }, t("msg.delete"));
     del.addEventListener("click", () => deleteMessage(m));
-    detail.append(el("div", { class: "msg-actions" }, del));
+    actions.append(del);
   }
+  if (actions.children.length) detail.append(actions);
   row.addEventListener("click", () => {
     const open = card.classList.toggle("open");
     row.setAttribute("aria-expanded", String(open));
@@ -311,6 +322,24 @@ function showDialog(dialog) {
     dialog.addEventListener("close", () => resolve(dialog.returnValue), { once: true });
     dialog.showModal();
   });
+}
+
+async function resendMessage(m, button) {
+  const msg = $("import-msg");
+  button.disabled = true;
+  button.textContent = t("resend.busy");
+  try {
+    const result = await api(`/api/messages/${m.id}/resend`, { method: "POST" });
+    Object.assign(m, { delivered: result.delivered, retries: result.retries });
+    msg.textContent = Object.values(result.delivered).includes(false) ? t("resend.partial") : t("resend.ok");
+    renderMessages();
+  } catch (err) {
+    if (err instanceof Unauthorized) return showLogin();
+    msg.textContent = err.status === 409 ? t("resend.nothing") : t("resend.failed", { e: errText(err) });
+    button.disabled = false;
+    button.textContent = t("resend.btn");
+    if (err.status === 409) loadMessages();  // Someone else already delivered it
+  }
 }
 
 // Deleting removes the message from the router (SIM) as well as from the Dashboard
@@ -430,6 +459,7 @@ async function loadMessages(append = false) {
     : [...data.items, ...loadedMessages.slice(MESSAGE_CHUNK).filter((m) => !known.has(m.id))];
   messagesTotal = data.total;
   messagesEditable = data.editable;
+  maxRetries = data.max_retries;
   renderMessages();
 }
 

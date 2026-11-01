@@ -392,11 +392,52 @@ def test_clear_messages_only_touches_history(env):
 
     deleted = client.delete("/api/messages").json()["deleted"]
     assert deleted >= 1
-    assert client.get("/api/messages").json() == {"total": 0, "items": [], "editable": False}
+    assert client.get("/api/messages").json() == {"total": 0, "items": [], "editable": False, "max_retries": 3}
     assert client.get("/api/status").json()["messages_total"] == 0
     sent_before = len(rec.sent)
     assert client.post("/api/poll").json()["new"] == []  # Not pushed again after clearing
     assert len(rec.sent) == sent_before
+
+
+def test_resend_endpoint_pushes_only_failed_providers(tmp_path):
+    from test_core import Flaky
+
+    router, rec, flaky = FakeRouter([[sms(1)]]), Recorder(), Flaky()
+    settings = Settings(tplink_password="x", admin_password="s3cret", data_dir=tmp_path / "data",
+                        log_dir=tmp_path / "logs", poll_interval_seconds=3600, _env_file=None)
+    with TestClient(create_app(settings, router=router, providers=[rec, flaky]), client=("127.0.0.1", 50000)) as client:
+        assert client.post("/api/messages/1/resend").status_code == 401
+        login(client)
+        client.post("/api/poll")
+        router.pages = [[sms(2), sms(1)]]
+        client.post("/api/poll")
+        item = client.get("/api/messages").json()["items"][0]
+        assert item["delivered"] == {"rec": True, "flaky": False} and item["retries"] == 0
+
+        assert client.post("/api/messages/999/resend").status_code == 404
+        flaky.down = False  # Works with the edit switch off
+        done = client.post(f"/api/messages/{item['id']}/resend")
+        assert done.json() == {"delivered": {"rec": True, "flaky": True}, "retries": 1}
+        assert len(rec.sent) == 1 and len(flaky.sent) == 1
+        assert client.post(f"/api/messages/{item['id']}/resend").status_code == 409
+
+
+def test_database_from_before_resend_is_migrated(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE NOT NULL, idx INTEGER NOT NULL, "
+        "sender TEXT NOT NULL, content TEXT NOT NULL, received_at TEXT NOT NULL, unread INTEGER NOT NULL, "
+        "delivered TEXT NOT NULL, notified_at REAL NOT NULL)"
+    )
+    conn.execute("INSERT INTO messages VALUES (1, 'u', 1, 'a', 'hi', '2026-01-01 00:00:00', 0, '{\"rec\": false}', 1.0)")
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    row = db.query("SELECT retries, last_attempt, content FROM messages")[0]
+    assert (row["retries"], row["last_attempt"], row["content"]) == (0, None, "hi")
 
 
 def test_i18n_dictionaries_are_complete():
