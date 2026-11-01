@@ -9,14 +9,14 @@ Get an instant alert for every new SMS that arrives on a TP-Link TL-MR6500v home
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-messages-dark.png">
-  <img src="assets/screenshot-messages-light.png" alt="The Dashboard Messages tab" width="720">
+  <img src="assets/screenshot-messages-light.png" alt="The Dashboard main page: status band and messages" width="720">
 </picture>
 
 > **Unofficial project.** It is not made, endorsed or supported by TP-Link. The router protocol was worked out by reading the router's own web interface, using the author's device. Use it at your own risk; it comes with no warranty (see [LICENSE](LICENSE)).
 
 ## Compatibility
 
-Tested on one TL-MR6500v. Other models and firmware versions may behave differently. If you try it on another one, please open an issue and tell us what happened.
+Tested on one TL-MR6500v, including reading, marking as read and deleting messages. Other models and firmware versions may behave differently. If you try it on another one, please open an issue and tell us what happened.
 
 ## How it works
 
@@ -36,7 +36,7 @@ After starting, open `http://localhost:6500` (Docker) or `http://localhost:8000`
 
 The Dashboard has three pages, and its language can be changed on the Settings page (Traditional Chinese, Simplified Chinese, English, Japanese). The choice applies at once and is remembered in the browser; the sign-in page has its own language menu. The home, App Log and Settings pages open from the icons in the top bar. On the main page, a round up-arrow button appears at the bottom right once you scroll past the top of the messages, and takes you back to it.
 
-- **Main page**: a slim status band on top (LTE connection state and signal, IP, gateway, DNS, last check and interval, enabled providers, errors in the last 24 hours), and the messages below it. The network details are read during each poll, so the app does not log in to the router an extra time. "More details" on the right of the band opens everything else (signal strength, roaming, network interface, both DNS servers, the full time of the last successful check, the last error, the number of messages on record, and when the network data was read); the choice is remembered in the browser.
+- **Main page**: the "Check now" button in the top bar checks the router right away instead of waiting for the next round. Below it, a slim status band on top (LTE connection state and signal, IP, gateway, DNS, last check and interval, enabled providers, errors in the last 24 hours), and the messages below it. The network details are read during each poll, so the app does not log in to the router an extra time. "More details" on the right of the band opens everything else (signal strength, roaming, network interface, both DNS servers, the full time of the last successful check, the last error, the number of messages on record, and when the network data was read); the choice is remembered in the browser.
 - **App Log** (top bar icon, with a red badge for unread errors): filter by level (all / warnings and above / errors only).
   - Errors you have not looked at yet are *unread*: the badge, the red bar on the main page and the red number in the status band all follow the unread count, and unread `ERROR` rows have a red edge in the log. Opening the log does not clear them. Press "Mark as read" on the bar, or "Mark errors as read" on the App Log page; the log itself is kept, and any error that happens later shows up as unread again. The state is saved in SQLite, so every browser agrees.
   - If the router cannot be checked right now, the bar shows that current error instead and has no "Mark as read" button; it goes away by itself after the next successful check.
@@ -46,7 +46,7 @@ The Dashboard has three pages, and its language can be changed on the Settings p
   - Whether other devices on the local network may open the Dashboard (off by default, so only this machine can)
   - Whether to also push error messages to the providers (off by default; the same error is pushed at most once every 30 minutes)
   - Whether messages can be edited (off by default, so messages are read-only). Turning it on asks for your Dashboard password once. While it is on, opening a message marks it read on the router, and each message gets a "Delete from router" button
-- **Messages**: the full text of each pushed message and each provider's delivery result, with the number of records in the title. The list is paged; choose how many messages per page (10, 20, 50 or 100), and the choice is remembered in the browser. The newest 200 messages are loaded at first; "Load more" fetches the next 200.
+- **Messages**: the full text of each pushed message and each provider's delivery result, with the number of records in the title. A dot before the sender marks a message that is still unread. The list is paged; choose how many messages per page (10, 20, 50 or 100), and the choice is remembered in the browser. The newest 200 messages are loaded at first; "Load more" fetches the next 200.
   - "Import existing messages from router" adds the latest `IMPORT_LIMIT` old messages from the router inbox to the records. They are only saved, not pushed, and are marked "Not pushed". The same import runs once on the first start.
   - "Clear Dashboard records" deletes only the records in the database. It never deletes messages on the router, and nothing is pushed again.
   - "Push again" appears on a message where a provider failed. It pushes only to the provider(s) that failed, so the others get no duplicate. It works even when editing is off.
@@ -55,7 +55,7 @@ The Dashboard has three pages, and its language can be changed on the Settings p
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-status-dark.png">
-  <img src="assets/screenshot-status-light.png" alt="The Dashboard Status tab" width="720">
+  <img src="assets/screenshot-status-light.png" alt="The status band with More details open" width="720">
 </picture>
 
 The thin line under the top bar counts down to the next check and starts over on every check.
@@ -183,6 +183,7 @@ To add a Dashboard language, add it to `LANGUAGES` and `STRINGS` in `src/tl_mr65
 - **The Dashboard shows 403 "Local access only"**: the source IP is not in the local networks. Check the warning in the App Log for the source IP (with Docker it is often `172.x` or `192.168.x`). Turn on the local network setting or add the address to `LOCAL_CLIENT_CIDRS`.
 - **The app fails to start with a required `admin_password` field**: add `ADMIN_PASSWORD` to `.env`.
 - **No notifications**: check `ENABLED_PROVIDERS` and the matching tokens. Push errors are in `logs/error.log`.
+- **A push failed (for example `Name or service not known`)**: this is usually a short network or DNS problem. The app retries by itself 3 times; if it still fails, open the message in the Dashboard and press "Push again".
 - **Missed old messages**: messages that arrive while the app is stopped are pushed after it restarts. Messages that existed before the first start (when `data/seen.json` did not exist yet) are not pushed.
 
 ## Contributing
