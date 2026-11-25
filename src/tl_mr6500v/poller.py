@@ -37,8 +37,18 @@ class Poller:
         # Router state: ok (last check succeeded) / busy (skipped because someone is logged in) / error / unknown (not checked yet)
         self.router_state = "unknown"
         self.router_checked_at: str | None = None
+        self._down = False  # True while a connection failure has been reported, so it is alerted once, then once on recovery
         self.network: dict | None = None
         self.network_at: str | None = None
+
+    async def _report_recovered(self) -> None:
+        """The router answered again after a reported failure: log it and push one "recovered" message."""
+        if not self._down:
+            return
+        self._down = False
+        log.info("Connection to the router is back")
+        if self.settings.get().notify_errors:
+            await self.notifier.notify_text("✅ TL-MR6500v is connected to the router again")
 
     async def poll_once(self) -> list[Sms]:
         async with self._lock:
@@ -52,13 +62,17 @@ class Poller:
                 # Someone using the web interface is normal. Try again next round; this is not an error
                 log.info("%s", exc)
                 self.router_state = "busy"
+                await self._report_recovered()
                 return []
             except RouterError as exc:
                 self.router_state = "error"
                 self.last_error = str(exc)
-                log.error("Checking messages failed: %s", exc)
+                # Alert only on the first failure; the repeats stay in the log but are not pushed
+                log.error("Checking messages failed: %s", exc, extra={"no_alert": self._down})
+                self._down = True
                 return []
             self.router_state = "ok"
+            await self._report_recovered()
             self.last_error = None
             self.last_poll_at = self.router_checked_at
             if result.network is not None:

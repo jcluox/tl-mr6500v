@@ -3,13 +3,13 @@ import logging
 
 from tl_mr6500v.db import Database
 from tl_mr6500v.history import MessageStore
-from tl_mr6500v.logging_setup import setup_logging
+from tl_mr6500v.logging_setup import LOGGER_NAME, setup_logging
 from tl_mr6500v.models import Sms
 from tl_mr6500v.notifier import Notifier
 from tl_mr6500v.poller import Poller
 from tl_mr6500v.providers.base import Provider
 from tl_mr6500v.router import PollResult, RouterBusy, parse_network, parse_sms, parse_sms_entries
-from tl_mr6500v.runtime_settings import AppSettings, SettingsStore
+from tl_mr6500v.runtime_settings import AppSettings, SettingsStore, SettingsUpdate
 from tl_mr6500v.state import SeenStore
 
 RAW = (
@@ -236,3 +236,39 @@ def test_imported_and_unconfigured_providers_are_not_retried(tmp_path):
     assert asyncio.run(poller.retry_pending()) == 1  # Still "due", but nothing is sent
     assert asyncio.run(poller.resend(message["id"]))["sent"] is False
     assert flaky.sent == []
+
+
+def test_router_outage_alerts_once_then_reports_recovery(tmp_path):
+    from tl_mr6500v.alerts import ErrorAlertHandler
+    from tl_mr6500v.router import RouterError
+
+    class Down(FakeRouter):
+        down = True
+
+        async def poll(self, *a, **k):
+            if self.down:
+                raise RouterError("unreachable")
+            return await super().poll(*a, **k)
+
+    async def scenario():
+        rec = Recorder()
+        router = Down([[sms(1)]])
+        poller = make_poller(tmp_path, router, [rec])
+        poller.settings.update(SettingsUpdate(notify_errors=True))
+        handler = ErrorAlertHandler(poller.notifier, poller.settings, asyncio.get_running_loop())
+        log = logging.getLogger(LOGGER_NAME)
+        log.addHandler(handler)
+        try:
+            for _ in range(3):
+                await poller.poll_once()
+            await asyncio.sleep(0.05)
+            assert len(rec.texts) == 1 and "unreachable" in rec.texts[0]
+            router.down = False
+            await poller.poll_once()
+            await poller.poll_once()
+            await asyncio.sleep(0.05)
+            assert len(rec.texts) == 2 and "again" in rec.texts[1]
+        finally:
+            log.removeHandler(handler)
+
+    asyncio.run(scenario())
