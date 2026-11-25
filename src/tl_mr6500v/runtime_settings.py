@@ -13,6 +13,7 @@ class AppSettings(BaseModel):
     kick_existing_login: bool = False  # Whether to kick out a user who is already logged in to the router
     allow_lan_access: bool = False  # Whether devices on the local network (other than this machine) may open the Dashboard
     notify_errors: bool = False  # Whether to push error messages to the providers too
+    allow_edit_messages: bool = False  # Whether opening a message marks it read on the router and single messages can be deleted
 
 
 class SettingsUpdate(BaseModel):
@@ -22,6 +23,8 @@ class SettingsUpdate(BaseModel):
     kick_existing_login: Optional[bool] = None
     allow_lan_access: Optional[bool] = None
     notify_errors: Optional[bool] = None
+    allow_edit_messages: Optional[bool] = None
+    edit_password: Optional[str] = None  # Only checked when allow_edit_messages is turned on; never stored
 
 
 class SettingsStore:
@@ -37,7 +40,7 @@ class SettingsStore:
         """Apply the changes and save them to the database. Return the fields that actually changed as {key: (old, new)}."""
         changes = {
             key: (getattr(self._current, key), value)
-            for key, value in patch.model_dump(exclude_none=True).items()
+            for key, value in patch.model_dump(exclude_none=True, exclude={"edit_password"}).items()
             if getattr(self._current, key) != value
         }
         for key, (_, value) in changes.items():

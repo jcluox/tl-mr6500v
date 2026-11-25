@@ -9,14 +9,14 @@ Get an instant alert for every new SMS that arrives on a TP-Link TL-MR6500v home
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-messages-dark.png">
-  <img src="assets/screenshot-messages-light.png" alt="The Dashboard Messages tab" width="720">
+  <img src="assets/screenshot-messages-light.png" alt="The Dashboard main page: status band and messages" width="720">
 </picture>
 
 > **Unofficial project.** It is not made, endorsed or supported by TP-Link. The router protocol was worked out by reading the router's own web interface, using the author's device. Use it at your own risk; it comes with no warranty (see [LICENSE](LICENSE)).
 
 ## Compatibility
 
-Tested on one TL-MR6500v. Other models and firmware versions may behave differently. If you try it on another one, please open an issue and tell us what happened.
+Tested on one TL-MR6500v, including reading, marking as read and deleting messages. Other models and firmware versions may behave differently. If you try it on another one, please open an issue and tell us what happened.
 
 ## How it works
 
@@ -25,7 +25,8 @@ Tested on one TL-MR6500v. Other models and firmware versions may behave differen
 3. When a new message arrives, it is sent to all enabled providers at once. If one provider fails, the others still get the message.
 4. Events (start-up, new messages and their delivery results, checks skipped because someone is logged in) are written to `logs/app.log`. Errors, such as push failures, also go to `logs/error.log`. The same log is also saved in SQLite so you can read it in the Dashboard.
 5. Messages that were already handled are remembered in `data/seen.json`, so nothing is pushed twice after a restart. **On the first start the app only records the existing messages. It does not push old ones.**
-6. Pushed messages (and messages imported on the first start), with each provider's delivery result, are saved in `data/app.db` and shown in the Dashboard.
+6. If a push fails (for example the network is down), the app tries again by itself, only for the provider that failed: 1, 5 and 15 minutes later. Failed retries are only warnings; after the third one fails, one error is logged. You can always push again by hand from the message in the Dashboard.
+7. Pushed messages (and messages imported on the first start), with each provider's delivery result, are saved in `data/app.db` and shown in the Dashboard.
 
 > If you are logged in to the router in a browser, the app notices this and skips that check by default, so it does not log you out. Messages that arrive in the meantime are pushed on a later check. You can change this in the Dashboard settings to force the login (which logs the other person out).
 
@@ -33,22 +34,28 @@ Tested on one TL-MR6500v. Other models and firmware versions may behave differen
 
 After starting, open `http://localhost:6500` (Docker) or `http://localhost:8000` (without Docker). Sign in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`. A login stays valid for `SESSION_DAYS` (30) days, and each use renews it. After 5 failed sign-ins in a row, that source is locked out for 5 minutes.
 
-The Dashboard has four tabs, and its language can be changed (Traditional Chinese, Simplified Chinese, English, Japanese):
+The Dashboard has three pages, and its language can be changed on the Settings page (Traditional Chinese, Simplified Chinese, English, Japanese). The choice applies at once and is remembered in the browser; the sign-in page has its own language menu. The home, App Log and Settings pages open from the icons in the top bar. On the main page, a round up-arrow button appears at the bottom right once you scroll past the top of the messages, and takes you back to it.
 
-- **Status**: the LTE connection (state, network type, signal, IP, gateway, DNS), polling details, and push details. The network details are read during each poll, so the app does not log in to the router an extra time.
-- **App Log**: filter by level (all / warnings and above / errors only). When there were errors in the last 24 hours, a warning bar appears at the top.
-- **Settings**: saved in SQLite and applied right away, with no restart:
+- **Main page**: the "Check now" button in the top bar checks the router right away instead of waiting for the next round. Below it, a slim status band on top (LTE connection state and signal, IP, gateway, DNS, last check and interval, enabled providers, errors in the last 24 hours), and the messages below it. The network details are read during each poll, so the app does not log in to the router an extra time. "More details" on the right of the band opens everything else (signal strength, roaming, network interface, both DNS servers, the full time of the last successful check, the last error, the number of messages on record, and when the network data was read); the choice is remembered in the browser.
+- **App Log** (top bar icon, with a red badge for unread errors): filter by level (all / warnings and above / errors only).
+  - Errors you have not looked at yet are *unread*: the badge, the red bar on the main page and the red number in the status band all follow the unread count, and unread `ERROR` rows have a red edge in the log. Opening the log does not clear them. Press "Mark as read" on the bar, or "Mark errors as read" on the App Log page; the log itself is kept, and any error that happens later shows up as unread again. The state is saved in SQLite, so every browser agrees.
+  - If the router cannot be checked right now, the bar shows that current error instead and has no "Mark as read" button; it goes away by itself after the next successful check.
+- **Settings** (top bar gear icon): the language menu is at the top. The other settings are saved in SQLite and applied right away, with no restart:
   - Check interval (5-3600 seconds)
   - Whether to force the login and log out a user who is already logged in to the router (off by default)
   - Whether other devices on the local network may open the Dashboard (off by default, so only this machine can)
   - Whether to also push error messages to the providers (off by default; the same error is pushed at most once every 30 minutes)
-- **Messages**: the full text of each pushed message and each provider's delivery result. The tab shows how many records there are.
+  - Whether messages can be edited (off by default, so messages are read-only). Turning it on asks for your Dashboard password once. While it is on, opening a message marks it read on the router, and each message gets a "Delete from router" button
+- **Messages**: the full text of each pushed message and each provider's delivery result, with the number of records in the title. A dot before the sender marks a message that is still unread. The list is paged; choose how many messages per page (10, 20, 50 or 100), and the choice is remembered in the browser. The newest 200 messages are loaded at first; "Load more" fetches the next 200.
   - "Import existing messages from router" adds the latest `IMPORT_LIMIT` old messages from the router inbox to the records. They are only saved, not pushed, and are marked "Not pushed". The same import runs once on the first start.
-  - "Clear message records" deletes only the records in the database. It never deletes messages on the router, and nothing is pushed again.
+  - "Clear Dashboard records" deletes only the records in the database. It never deletes messages on the router, and nothing is pushed again.
+  - "Push again" appears on a message where a provider failed. It pushes only to the provider(s) that failed, so the others get no duplicate. It works even when editing is off.
+  - "Delete from router" (only when editing is turned on) permanently deletes one message from the router's inbox (SIM) **and** from the records, after a confirmation. It cannot be undone, and the message is never pushed again.
+  - The filter above the list searches the text and sender, and optionally a time range. It only looks at the messages that are loaded (not the whole database); use "Load more" to include older ones. The results are paged too.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-status-dark.png">
-  <img src="assets/screenshot-status-light.png" alt="The Dashboard Status tab" width="720">
+  <img src="assets/screenshot-status-light.png" alt="The status band with More details open" width="720">
 </picture>
 
 The thin line under the top bar counts down to the next check and starts over on every check.
@@ -134,13 +141,17 @@ Except for `/health` and sign-in, every `/api/*` endpoint needs a login (cookie 
 | `GET /health` | No login needed. `ok` (false if the last check failed) and the time of the last check. Used by the Docker healthcheck |
 | `POST /api/auth/login` | `{"username", "password"}`. On success it sets an httpOnly cookie |
 | `POST /api/auth/logout` / `GET /api/auth/me` | Sign out / the current user (the only role for now is `admin`) |
-| `GET /api/status` | Polling state, enabled providers, errors in the last 24 hours |
+| `GET /api/status` | Polling state, enabled providers, errors in the last 24 hours (`errors_24h`), and how many of them are unread (`errors_unread`, `errors_ack_at`) |
 | `GET /api/router` | Router state (`ok` / `busy` / `error`) and LTE connection details |
-| `GET /api/messages?limit&offset` | Message history (newest first) with each provider's delivery result |
+| `GET /api/messages?limit&offset` | Message history (newest first) with each provider's delivery result, and `editable` (whether message editing is on) |
 | `DELETE /api/messages` | Delete the message records in the database (router messages are not touched) |
+| `DELETE /api/messages/{id}` | Permanently delete one message from the router and the history. `403 edit_disabled` unless message editing is on |
+| `POST /api/messages/{id}/resend` | Push a message again, only to the providers where it failed. `409 nothing_to_resend` if nothing failed. Works with message editing off |
+| `POST /api/messages/{id}/read` | Mark a message as read on the router and in the history. `403 edit_disabled` unless message editing is on |
 | `POST /api/messages/import` | Import the latest messages from the router inbox into the history (nothing is pushed) |
 | `GET /api/logs?level&limit&before_id` | App log; `level` is `INFO`, `WARNING` or `ERROR` |
-| `GET /api/settings` / `PUT /api/settings` | Read / change the settings |
+| `POST /api/errors/ack` | Mark the errors logged so far as read (the log is kept) |
+| `GET /api/settings` / `PUT /api/settings` | Read / change the settings. Turning on `allow_edit_messages` also needs `edit_password` (`403 password_required` / `wrong_password`) |
 | `POST /api/poll` | Check now and return the new messages |
 
 ## Add a provider
@@ -172,6 +183,7 @@ To add a Dashboard language, add it to `LANGUAGES` and `STRINGS` in `src/tl_mr65
 - **The Dashboard shows 403 "Local access only"**: the source IP is not in the local networks. Check the warning in the App Log for the source IP (with Docker it is often `172.x` or `192.168.x`). Turn on the local network setting or add the address to `LOCAL_CLIENT_CIDRS`.
 - **The app fails to start with a required `admin_password` field**: add `ADMIN_PASSWORD` to `.env`.
 - **No notifications**: check `ENABLED_PROVIDERS` and the matching tokens. Push errors are in `logs/error.log`.
+- **A push failed (for example `Name or service not known`)**: this is usually a short network or DNS problem. The app retries by itself 3 times; if it still fails, open the message in the Dashboard and press "Push again".
 - **Missed old messages**: messages that arrive while the app is stopped are pushed after it restarts. Messages that existed before the first start (when `data/seen.json` did not exist yet) are not pushed.
 
 ## Contributing

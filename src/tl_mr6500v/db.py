@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS messages (
     received_at TEXT NOT NULL,
     unread INTEGER NOT NULL,
     delivered TEXT NOT NULL,
-    notified_at REAL NOT NULL
+    notified_at REAL NOT NULL,
+    retries INTEGER NOT NULL DEFAULT 0,
+    last_attempt REAL
 );
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +48,12 @@ class Database:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            # Databases created before the resend feature lack these columns
+            columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(messages)")}
+            if "retries" not in columns:
+                self._conn.execute("ALTER TABLE messages ADD COLUMN retries INTEGER NOT NULL DEFAULT 0")
+            if "last_attempt" not in columns:
+                self._conn.execute("ALTER TABLE messages ADD COLUMN last_attempt REAL")
 
     def query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:
